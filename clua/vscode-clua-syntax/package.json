@@ -1,0 +1,60 @@
+{
+  "name": "clua-syntax",
+  "displayName": "CLua Syntax",
+  "description": "Syntax highlighting for .clua files",
+  "icon": "logo.png",
+  "version": "0.1.0",
+  "publisher": "local",
+  "private": true,
+  "main": "./extension.js",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "scripts": {
+    "package": "vsce package --allow-missing-repository --skip-license",
+    "package:out": "vsce package --allow-missing-repository --skip-license -o clua-syntax.vsix"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.1"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "clua",
+        "aliases": [
+          "CLua",
+          "clua"
+        ],
+        "extensions": [
+          ".clua"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/clua-file.svg",
+          "dark": "./icons/clua-file.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "clua",
+        "scopeName": "source.clua",
+        "path": "./syntaxes/clua.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "clua",
+        "path": "./snippets/clua.json"
+      }
+    ]
+  }
+}

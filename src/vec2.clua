@@ -1,0 +1,58 @@
+--- Vector 2D class
+class Vec2
+	var x: number
+	var y: number
+
+	function new(x: number, y: number)
+		self.x = x
+		self.y = y
+	end
+
+	function __add(other: Vec2): Vec2
+		return new Vec2(self.x + other.x, self.y + other.y)
+	end
+
+	function __sub(other: Vec2): Vec2
+		return new Vec2(self.x - other.x, self.y - other.y)
+	end
+
+	function __mul(scalar: number): Vec2
+		return new Vec2(self.x * scalar, self.y * scalar)
+	end
+
+	function __div(scalar: number): Vec2
+		return new Vec2(self.x / scalar, self.y / scalar)
+	end
+
+	function __unm(): Vec2
+		return new Vec2(-self.x, -self.y)
+	end
+
+	function __eq(other: Vec2): boolean
+		return self.x == other.x and self.y == other.y
+	end
+
+	function __lt(other: Vec2): boolean
+		return self.x < other.x or (self.x == other.x and self.y < other.y)
+	end
+
+	function __le(other: Vec2): boolean
+		return self.x < other.x or (self.x == other.x and self.y <= other.y)
+	end
+
+	function __gt(other: Vec2): boolean
+		return self.x > other.x or (self.x == other.x and self.y > other.y)
+	end
+
+	function __ge(other: Vec2): boolean
+		return self.x > other.x or (self.x == other.x and self.y >= other.y)
+	end
+
+	function __tostring(): string
+		return "(" .. self.x .. ", " .. self.y .. ")"
+	end
+
+	function length(): number
+		return math.sqrt(self.x * self.x + self.y * self.y)
+	end
+end

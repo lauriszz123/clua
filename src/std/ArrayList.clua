@@ -1,0 +1,33 @@
+class ArrayList<T>
+	local items: T[]
+
+	function new()
+		self.items = {}
+	end
+
+	function add(item: T)
+		table.insert(self.items, item)
+	end
+
+	function remove(index: number)
+		table.remove(self.items, index)
+	end
+
+	function get(index: number): T
+		return self.items[index]
+	end
+
+	function size(): number
+		return #self.items
+	end
+
+	function iter(): function(): T
+		local i = 0
+		return function()
+			i = i + 1
+			if i <= #self.items then
+				return self.items[i]
+			end
+		end
+	end
+end

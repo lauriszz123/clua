@@ -1,0 +1,13 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Main outer circle - dark blue background -->
+  <circle cx="128" cy="128" r="120" fill="#1a3a52"/>
+  
+  <!-- Mid-tone circle -->
+  <circle cx="128" cy="128" r="110" fill="#2a4a6a"/>
+  
+  <!-- Bright inner circle - Lua dot style -->
+  <circle cx="128" cy="128" r="55" fill="#4a9eff"/>
+  
+  <!-- Small dark center dot -->
+  <circle cx="128" cy="128" r="15" fill="#1a3a52"/>
+</svg>

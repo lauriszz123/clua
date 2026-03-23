@@ -1,0 +1,32 @@
+import Paddle
+import Ball
+import std.ArrayList
+
+class Main extends Love
+	local paddle: Paddle
+	local balls: ArrayList<Ball>
+
+	function new()
+		local startX = love.graphics.getWidth() / 2 - 50
+		local startY = love.graphics.getHeight() - 50
+		self.paddle = new Paddle(startX, startY, 100, 20)
+
+		self.balls = new ArrayList<Ball>()
+		local ball = new Ball(love.graphics.getWidth() / 2, love.graphics.getHeight() / 2, 10)
+		self.balls.add(ball)
+	end
+
+	function update(dt)
+		self.paddle.update(dt)
+		for ball in self.balls.iter() do
+			ball.update(dt)
+		end
+	end
+
+	function draw()
+		self.paddle.draw()
+		for ball in self.balls.iter() do
+			ball.draw()
+		end
+	end
+end
