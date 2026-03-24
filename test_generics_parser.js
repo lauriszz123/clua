@@ -678,6 +678,64 @@ end
 });
 
 // ============================================================================
+// Test: Diagnostics catch wrong imported generic method argument in nested call
+// ============================================================================
+test("Diagnostics catch wrong imported generic method argument type in nested expression", function () {
+	const src = `
+import std.ArrayList
+
+class Main
+  list: ArrayList<number>
+  function run()
+    print("Value: " .. self.list.get("test"))
+  end
+end
+`;
+	const appUri = pathToFileUri(path.join(__dirname, "examples_generics.clua"));
+	const wsUri = pathToFileUri(__dirname);
+	const resolvedPath = resolveModulePathToFile("std.ArrayList", appUri, [
+		wsUri,
+	]);
+	assert(resolvedPath, "Resolver should find std.ArrayList in workspace");
+
+	const importedText = fs.readFileSync(resolvedPath, "utf8");
+	const importedModel = buildModel(importedText);
+	const workspaceIndex = new Map([
+		[
+			"ArrayList",
+			{
+				uri: pathToFileUri(resolvedPath),
+				classInfo: importedModel.classes.get("ArrayList"),
+			},
+		],
+	]);
+
+	const doc = { getText: () => src };
+	const diags = validateTextDocument(doc, workspaceIndex, {
+		resolveImport: (modulePath) => {
+			const p = resolveModulePathToFile(modulePath, appUri, [wsUri]);
+			if (!p) {
+				return null;
+			}
+			return {
+				targetUri: pathToFileUri(p),
+				targetModel: buildModel(fs.readFileSync(p, "utf8")),
+			};
+		},
+	});
+
+	has(
+		diags,
+		(d) =>
+			d.message.includes("Argument 1") &&
+			d.message.includes("ArrayList<number>.get") &&
+			d.message.includes("expects number") &&
+			d.message.includes("got string"),
+		"Should report wrong type for imported nested method-call argument",
+	);
+});
+
+// ============================================================================
 // Test: Diagnostics accept matching overloaded method call on generic field
 // ============================================================================
 test("Diagnostics accept matching overload on generic field", function () {

@@ -44,7 +44,10 @@ function M.loadfile(path, env)
 	end
 
 	local chunk_name = "@" .. path
-	local compiled = M.compile(source, chunk_name)
+	local ok, compiled = pcall(M.compile, source, chunk_name)
+	if not ok then
+		error(compiled, 0)
+	end
 	return compat_load(compiled, chunk_name, env)
 end
 

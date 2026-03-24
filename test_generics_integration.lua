@@ -106,17 +106,39 @@ end
 -- ============================================================================
 passed = passed
 	+ (
-		test("Runtime type mismatch for ArrayList.get", function()
+		test("Runtime type mismatch remains for dynamic ArrayList.get index", function()
 				local src = [[
-import std.ArrayList
+class ArrayList<T>
+	local items: T[]
+
+	function new()
+		self.items = {}
+	end
+
+	function add(item: T)
+		table.insert(self.items, item)
+	end
+
+	function get(index: number): T
+		return self.items[index]
+	end
+end
+
+function pickIndex(flag: any): any
+	if flag then
+		return 1
+	end
+
+	return "test"
+end
 
 class App
 	local list: ArrayList<number>
 
-	function new()
+	function new(flag)
 		self.list = new ArrayList<number>()
 		self.list.add(1)
-		print(self.list.get("test"))
+		print(self.list.get(pickIndex(flag)))
 	end
 end
 ]]
@@ -124,7 +146,7 @@ end
 				local chunk = assert(load(lua), "Compiled Lua should be valid")
 				local App = chunk()
 				local ok, err = pcall(function()
-					App.new()
+					App.new(false)
 				end)
 
 				assert(not ok, "Type mismatch should fail at runtime")

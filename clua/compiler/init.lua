@@ -1,27 +1,38 @@
+-- Code generator: transforms CLua source to Lua. Entry point: M.compile().
+
+local util = require("clua.compiler.util")
+local typesys = require("clua.compiler.typesys")
+local parser = require("clua.compiler.parser")
+local semantic = require("clua.compiler.semantic")
+
+local trim = util.trim
+local split_lines = util.split_lines
+local normalize_import_module_path = util.normalize_import_module_path
+
+local erase_generic_type = typesys.erase_generic_type
+local parse_generic_param_map = typesys.parse_generic_param_map
+local merge_generic_param_maps = typesys.merge_generic_param_maps
+
+local find_block_end = parser.find_block_end
+local parse_function_signature = parser.parse_function_signature
+local parse_params = parser.parse_params
+local parse_field = parser.parse_field
+
+local validate_semantic_method_calls = semantic.validate_semantic_method_calls
+
 local M = {}
 
-local function trim(s)
-	return (s:gsub("^%s+", ""):gsub("%s+$", ""))
-end
-
-local erase_generic_type
-
-local function normalize_import_module_path(module_path)
-	if type(module_path) == "string" and module_path:match("^std%.") then
-		return "clua." .. module_path
-	end
-	return module_path
-end
+-- --------------------------------------------------------------------------
+-- Line rewriters
+-- --------------------------------------------------------------------------
 
 local function rewrite_new_expressions(line)
 	return (
 		line:gsub("new%s+([%a_][%w_%.<>%,%[%]%s]*)%s*%(", function(type_name)
-			if erase_generic_type then
-				local erased = erase_generic_type(type_name)
-				if erased then
-					local class_name = erased:gsub("%[%]", "")
-					return class_name .. ".new("
-				end
+			local erased = erase_generic_type(type_name)
+			if erased then
+				local class_name = erased:gsub("%[%]", "")
+				return class_name .. ".new("
 			end
 			return type_name .. ".new("
 		end)
@@ -48,308 +59,16 @@ local function rewrite_import_statement(line)
 	return rewritten
 end
 
-local function split_lines(source)
-	local lines = {}
-	source = source:gsub("\r\n", "\n")
-	for line in (source .. "\n"):gmatch("(.-)\n") do
-		lines[#lines + 1] = line
-	end
-	return lines
-end
+-- --------------------------------------------------------------------------
+-- Forward declarations (mutually recursive emitters)
+-- --------------------------------------------------------------------------
 
-local TYPE_NAME_PATTERN = "([%a_][%w_%.%[%]<>%,]*)"
+local strip_typed_local_annotation
+local emit_body_with_field_checks
 
-local function split_top_level_commas(text)
-	local parts = {}
-	local angle_depth = 0
-	local paren_depth = 0
-	local bracket_depth = 0
-	local start_idx = 1
-
-	for i = 1, #text do
-		local ch = text:sub(i, i)
-		if ch == "<" then
-			angle_depth = angle_depth + 1
-		elseif ch == ">" then
-			angle_depth = angle_depth - 1
-			if angle_depth < 0 then
-				return nil
-			end
-		elseif ch == "(" then
-			paren_depth = paren_depth + 1
-		elseif ch == ")" then
-			paren_depth = paren_depth - 1
-			if paren_depth < 0 then
-				return nil
-			end
-		elseif ch == "[" then
-			bracket_depth = bracket_depth + 1
-		elseif ch == "]" then
-			bracket_depth = bracket_depth - 1
-			if bracket_depth < 0 then
-				return nil
-			end
-		elseif ch == "," and angle_depth == 0 and paren_depth == 0 and bracket_depth == 0 then
-			parts[#parts + 1] = trim(text:sub(start_idx, i - 1))
-			start_idx = i + 1
-		end
-	end
-
-	if angle_depth ~= 0 or paren_depth ~= 0 or bracket_depth ~= 0 then
-		return nil
-	end
-
-	parts[#parts + 1] = trim(text:sub(start_idx))
-	return parts
-end
-
-local function normalize_type_name(type_name)
-	if not type_name then
-		return nil
-	end
-	local normalized = trim(type_name):gsub("%s+", "")
-	if normalized == "" then
-		return nil
-	end
-	return normalized
-end
-
-local function strip_array_suffix(type_name)
-	local base = type_name
-	local depth = 0
-	while base:sub(-2) == "[]" do
-		base = base:sub(1, -3)
-		depth = depth + 1
-	end
-	return base, depth
-end
-
-local validate_type_name
-
-local function validate_function_type(core)
-	local params_blob, return_type = core:match("^function(%b())%s*:%s*(.+)$")
-	if not params_blob then
-		params_blob = core:match("^function(%b())$")
-	end
-
-	if not params_blob then
-		return false, nil
-	end
-
-	local params_inner = params_blob:sub(2, -2)
-	if params_inner ~= "" then
-		local params = split_top_level_commas(params_inner)
-		if not params then
-			return false, nil
-		end
-
-		for _, param_type in ipairs(params) do
-			local normalized_param = trim(param_type)
-			if normalized_param == "" then
-				return false, nil
-			end
-
-			-- Support named function-type params, e.g. function(item: T)
-			local _, named_param_type = normalized_param:match("^([%a_][%w_]*)%s*:%s*(.-)%s*$")
-			if named_param_type and named_param_type ~= "" then
-				normalized_param = named_param_type
-			end
-
-			local ok = validate_type_name(normalized_param)
-			if not ok then
-				return false, nil
-			end
-		end
-	end
-
-	if return_type and trim(return_type) ~= "" then
-		local ok = validate_type_name(return_type)
-		if not ok then
-			return false, nil
-		end
-	end
-
-	return true, "function"
-end
-
-local function validate_type_core(core)
-	if core:match("^function%b()") then
-		return validate_function_type(core)
-	end
-
-	if core:match("^[%a_][%w_%.]*$") then
-		return true, core
-	end
-
-	local base, args_blob = core:match("^([%a_][%w_%.]*)<(.*)>$")
-	if not base then
-		return false, nil
-	end
-
-	if args_blob == "" then
-		return false, nil
-	end
-
-	local args = split_top_level_commas(args_blob)
-	if not args or #args == 0 then
-		return false, nil
-	end
-
-	for _, arg in ipairs(args) do
-		if arg == "" then
-			return false, nil
-		end
-		local ok = validate_type_name(arg)
-		if not ok then
-			return false, nil
-		end
-	end
-
-	return true, base
-end
-
-validate_type_name = function(type_name)
-	local normalized = normalize_type_name(type_name)
-	if not normalized then
-		return false, nil
-	end
-
-	local base, depth = strip_array_suffix(normalized)
-	local ok, erased_core = validate_type_core(base)
-	if not ok then
-		return false, nil
-	end
-
-	return true, erased_core .. string.rep("[]", depth)
-end
-
-erase_generic_type = function(type_name)
-	local ok, erased = validate_type_name(type_name)
-	if not ok then
-		return nil
-	end
-	return erased
-end
-
-local function parse_generic_param_map(generic_capture, line_no)
-	local map = {}
-	if not generic_capture or generic_capture == "" then
-		return map
-	end
-
-	local inner = generic_capture:sub(2, -2)
-	if trim(inner) == "" then
-		error(("Invalid generic parameter list at line %d"):format(line_no))
-	end
-
-	local names = split_top_level_commas(inner)
-	if not names then
-		error(("Invalid generic parameter list at line %d"):format(line_no))
-	end
-
-	for _, name in ipairs(names) do
-		if not name:match("^[%a_][%w_]*$") then
-			error(("Invalid generic type parameter '%s' at line %d"):format(name, line_no))
-		end
-		map[name] = true
-	end
-
-	return map
-end
-
-local function merge_generic_param_maps(a, b)
-	local out = {}
-	for name, _ in pairs(a or {}) do
-		out[name] = true
-	end
-	for name, _ in pairs(b or {}) do
-		out[name] = true
-	end
-	return out
-end
-
-local function erase_type_for_runtime(type_name, generic_params)
-	local erased = erase_generic_type(type_name)
-	if not erased then
-		return nil
-	end
-
-	local base, depth = strip_array_suffix(erased)
-	if generic_params and generic_params[base] then
-		base = "any"
-	end
-
-	return base .. string.rep("[]", depth)
-end
-
-local function parse_params(params_raw, generic_params)
-	local clean = {}
-	local typed = {}
-
-	local raw = trim(params_raw)
-	if raw == "" then
-		return clean, typed
-	end
-
-	local tokens = split_top_level_commas(raw)
-	if not tokens then
-		error(("Invalid parameter list: %s"):format(raw))
-	end
-
-	for _, part in ipairs(tokens) do
-		local token = trim(part)
-		if token ~= "" then
-			local name, type_name = token:match("^([%a_][%w_]*)%s*:%s*(.-)%s*$")
-			if name then
-				local erased = erase_type_for_runtime(type_name, generic_params)
-				if not erased then
-					error(("Invalid parameter type annotation: %s"):format(token))
-				end
-				clean[#clean + 1] = name
-				typed[#typed + 1] = { name = name, type_name = erased }
-			else
-				clean[#clean + 1] = token
-			end
-		end
-	end
-
-	return clean, typed
-end
-
-local function block_delta(line)
-	local text = line:gsub("%-%-.*$", "")
-	-- Do not treat function type annotations (e.g. function(): T) as block starters.
-	text = text:gsub(":%s*function%s*%(", ": __fn_type__(")
-
-	-- `elseif ... then` closes the previous branch and opens a new one, net depth 0.
-	if text:match("^%s*elseif%b()%s*then") or text:match("^%s*elseif%s+.-%s+then%s*$") then
-		return 0
-	end
-
-	local delta = 0
-
-	for token in text:gmatch("%f[%a]([%a_]+)%f[%A]") do
-		if token == "function" or token == "then" or token == "do" or token == "repeat" then
-			delta = delta + 1
-		elseif token == "end" or token == "until" then
-			delta = delta - 1
-		end
-	end
-
-	return delta
-end
-
-local function find_block_end(lines, start_idx)
-	local depth = 1
-	for i = start_idx + 1, #lines do
-		depth = depth + block_delta(lines[i])
-		if depth == 0 then
-			return i
-		end
-	end
-
-	error(("Unclosed block starting at line %d"):format(start_idx))
-end
+-- --------------------------------------------------------------------------
+-- Enum compiler
+-- --------------------------------------------------------------------------
 
 local function compile_enum(lines, start_idx)
 	local header = lines[start_idx]
@@ -411,112 +130,9 @@ local function compile_enum(lines, start_idx)
 	return out, end_idx, enum_name
 end
 
-local function finalize_typed_field(name, type_name, default_expr, is_private, generic_params)
-	local erased = erase_type_for_runtime(type_name, generic_params)
-	if not erased then
-		return nil
-	end
-	return name, erased, default_expr, is_private
-end
-
-local function parse_field(line, generic_params)
-	local name, type_name, default_expr = line:match("^%s*var%s+([%a_][%w_]*)%s*:%s*(.-)%s*=%s*(.-)%s*$")
-	if name then
-		return finalize_typed_field(name, type_name, default_expr, false, generic_params)
-	end
-
-	name, type_name, default_expr = line:match("^%s*local%s+([%a_][%w_]*)%s*:%s*(.-)%s*=%s*(.-)%s*$")
-	if name then
-		return finalize_typed_field(name, type_name, default_expr, true, generic_params)
-	end
-
-	name, type_name, default_expr = line:match("^%s*([%a_][%w_]*)%s*:%s*(.-)%s*=%s*(.-)%s*$")
-	if name then
-		return finalize_typed_field(name, type_name, default_expr, false, generic_params)
-	end
-
-	name, type_name = line:match("^%s*var%s+([%a_][%w_]*)%s*:%s*(.-)%s*$")
-	if name then
-		return finalize_typed_field(name, type_name, nil, false, generic_params)
-	end
-
-	name, type_name = line:match("^%s*local%s+([%a_][%w_]*)%s*:%s*(.-)%s*$")
-	if name then
-		return finalize_typed_field(name, type_name, nil, true, generic_params)
-	end
-
-	name, type_name = line:match("^%s*([%a_][%w_]*)%s*:%s*(.-)%s*$")
-	if name then
-		return finalize_typed_field(name, type_name, nil, false, generic_params)
-	end
-
-	return nil
-end
-
-local function parse_function_signature(signature)
-	local is_local = false
-	local function_name, generic_capture, params_start =
-		signature:match("^%s*local%s+function%s+([%a_][%w_]*)(%b<>)%s*()%(.*$")
-
-	if function_name then
-		is_local = true
-	else
-		function_name, generic_capture, params_start =
-			signature:match("^%s*function%s+([%a_][%w_]*)(%b<>)%s*()%(.*$")
-	end
-
-	if not function_name then
-		function_name, params_start = signature:match("^%s*local%s+function%s+([%a_][%w_]*)%s*()%(.*$")
-		if function_name then
-			is_local = true
-		else
-			function_name, params_start = signature:match("^%s*function%s+([%a_][%w_]*)%s*()%(.*$")
-		end
-	end
-
-	if not function_name or not params_start then
-		return nil
-	end
-
-	local depth = 0
-	local params_end = nil
-	for i = params_start, #signature do
-		local ch = signature:sub(i, i)
-		if ch == "(" then
-			depth = depth + 1
-		elseif ch == ")" then
-			depth = depth - 1
-			if depth == 0 then
-				params_end = i
-				break
-			elseif depth < 0 then
-				return nil
-			end
-		end
-	end
-
-	if not params_end then
-		return nil
-	end
-
-	local params_raw = signature:sub(params_start + 1, params_end - 1)
-	local tail = trim(signature:sub(params_end + 1))
-	local has_return_annotation = false
-	if tail ~= "" then
-		if not tail:match("^:%s*.+$") then
-			return nil
-		end
-		has_return_annotation = true
-	end
-
-	return {
-		is_local = is_local,
-		name = function_name,
-		generic_capture = generic_capture,
-		params_raw = params_raw,
-		has_return_annotation = has_return_annotation,
-	}
-end
+-- --------------------------------------------------------------------------
+-- Method compiler
+-- --------------------------------------------------------------------------
 
 local function compile_method(class_name, lines, start_idx, class_generic_params)
 	local signature = lines[start_idx]
@@ -550,7 +166,9 @@ local function compile_method(class_name, lines, start_idx, class_generic_params
 		end_idx
 end
 
-local strip_typed_local_annotation
+-- --------------------------------------------------------------------------
+-- Standalone function compiler
+-- --------------------------------------------------------------------------
 
 local function compile_standalone_function(lines, start_idx)
 	local signature = lines[start_idx]
@@ -598,6 +216,10 @@ local function compile_standalone_function(lines, start_idx)
 	return out, end_idx
 end
 
+-- --------------------------------------------------------------------------
+-- Emission helpers
+-- --------------------------------------------------------------------------
+
 local function emit_param_asserts(out, class_name, method_name, typed_params)
 	for _, info in ipairs(typed_params) do
 		out[#out + 1] = ("  __clua_runtime.assert_type(%s, %q, %q)"):format(
@@ -644,8 +266,6 @@ local function rewrite_private_field_access(line, private_fields)
 	end
 	return rewritten
 end
-
-local emit_body_with_field_checks
 
 local function group_methods_by_name(methods)
 	local groups = {}
@@ -754,6 +374,7 @@ local function emit_method_implementation(
 	out[#out + 1] = ""
 end
 
+-- Assigned below (forward declared above due to mutual use with emit_method_implementation).
 strip_typed_local_annotation = function(line)
 	local indent, name, type_name, expr = line:match("^(%s*)local%s+([A-Za-z_][A-Za-z0-9_]*)%s*:%s*(.-)%s*=%s*(.-)%s*$")
 	if name and erase_generic_type(type_name) then
@@ -794,6 +415,10 @@ emit_body_with_field_checks = function(out, body, fields_by_name, private_fields
 		end
 	end
 end
+
+-- --------------------------------------------------------------------------
+-- Class compiler
+-- --------------------------------------------------------------------------
 
 local function parse_class_header(header, line_no)
 	local class_name, generic_params, extends_raw =
@@ -1011,6 +636,10 @@ local function compile_class(lines, start_idx)
 	return out, end_idx, class_name, private_methods
 end
 
+-- --------------------------------------------------------------------------
+-- Helpers used in the main compile loop
+-- --------------------------------------------------------------------------
+
 local function assert_no_private_method_access(line, line_no, private_methods_by_class)
 	local text = line:gsub("%-%-.*$", "")
 	for class_name, method_name in text:gmatch("([%a_][%w_]*)%.([%a_][%w_]*)%s*%(") do
@@ -1035,8 +664,13 @@ local function strip_typed_locals(line)
 	return rewrite_new_expressions(updated)
 end
 
+-- --------------------------------------------------------------------------
+-- Public entry point
+-- --------------------------------------------------------------------------
+
 function M.compile(source, chunk_name)
 	local lines = split_lines(source)
+	validate_semantic_method_calls(lines, chunk_name)
 	local out = {}
 	local saw_class = false
 	local saw_enum = false

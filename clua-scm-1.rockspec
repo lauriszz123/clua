@@ -24,7 +24,11 @@ build = {
   type = "builtin",
   modules = {
     ["clua"] = "clua/init.lua",
-    ["clua.compiler"] = "clua/compiler.lua",
+    ["clua.compiler"] = "clua/compiler/init.lua",
+    ["clua.compiler.util"] = "clua/compiler/util.lua",
+    ["clua.compiler.typesys"] = "clua/compiler/typesys.lua",
+    ["clua.compiler.parser"] = "clua/compiler/parser.lua",
+    ["clua.compiler.semantic"] = "clua/compiler/semantic.lua",
     ["clua.runtime"] = "clua/runtime.lua"
   },
   copy_directories = {

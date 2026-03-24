@@ -238,6 +238,39 @@ end
 	)
 
 -- ============================================================================
+-- Test: Imported generic method mismatch should fail at compile time
+-- ============================================================================
+passed = passed
+	+ (
+		test("Imported generic method mismatch fails at compile time", function()
+				local src = [[
+import std.ArrayList
+
+class App
+	local list: ArrayList<number>
+
+	function new()
+		self.list = new ArrayList<number>()
+		self.list.add(1)
+		print(self.list.get("test"))
+	end
+end
+]]
+				local ok, err = pcall(function()
+					compile(src)
+				end)
+
+				assert(not ok, "Compile should reject imported generic type mismatch")
+				assert(
+					has(tostring(err), "Argument 1 to ArrayList<number>.get expects number, got string"),
+					"Error should report the imported generic number/string mismatch"
+				)
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
 -- Test: Private field with generics
 -- ============================================================================
 passed = passed
