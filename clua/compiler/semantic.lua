@@ -447,10 +447,7 @@ local function build_module_search_path(chunk_name)
 		add_entry(entry)
 	end
 
-	local chunk_dir = type(chunk_name) == "string"
-		and chunk_name:match("[/\\]")
-		and get_source_dir(chunk_name)
-		or nil
+	local chunk_dir = type(chunk_name) == "string" and chunk_name:match("[/\\]") and get_source_dir(chunk_name) or nil
 	add_root(chunk_dir)
 	add_root(COMPILER_ROOT_DIR)
 	add_root(".")
@@ -462,37 +459,90 @@ local function search_rocks_tree_semantic(module_name)
 	local version = tostring(_VERSION or ""):match("(%d+%.%d+)") or "5.1"
 	local module_rel = module_name:gsub("%.", "/")
 	local rock_name = module_name:match("^([%a_][%w_]*)") or module_name
+	local is_windows = package.config:sub(1, 1) == "\\"
+
+	local function dir_exists(path)
+		if not path or path == "" then
+			return false
+		end
+
+		if is_windows then
+			local normalized = path:gsub("/", "\\")
+			local pipe = io.popen('cmd /c if exist "' .. normalized .. '" (echo 1) else (echo 0)')
+			if not pipe then
+				return false
+			end
+			local out = pipe:read("*l") or ""
+			pipe:close()
+			return out:match("^%s*1%s*$") ~= nil
+		end
+
+		local ok = os.rename(path, path)
+		return ok ~= nil
+	end
+
+	local function list_subdirs(path)
+		if not dir_exists(path) then
+			return {}
+		end
+
+		local command
+		if is_windows then
+			local normalized = path:gsub("/", "\\")
+			command = 'dir /b /ad "' .. normalized .. '" 2>nul'
+		else
+			command = 'ls -1 "' .. path .. '" 2>/dev/null'
+		end
+
+		local pipe = io.popen(command)
+		if not pipe then
+			return {}
+		end
+
+		local out = {}
+		for line in pipe:lines() do
+			if line ~= "" and line ~= "." and line ~= ".." then
+				out[#out + 1] = line
+			end
+		end
+		pipe:close()
+		return out
+	end
 
 	local home = os.getenv("HOME") or os.getenv("USERPROFILE") or ""
-	local rock_roots = {
-		"./.luarocks/lib/luarocks/rocks-" .. version,
-		home ~= "" and (home .. "/.luarocks/lib/luarocks/rocks-" .. version) or nil,
-		"/usr/local/lib/luarocks/rocks-" .. version,
-		"/usr/lib/luarocks/rocks-" .. version,
-	}
+	local rock_roots = { "./.luarocks/lib/luarocks/rocks-" .. version }
+
+	if is_windows then
+		local appdata = os.getenv("APPDATA")
+		if appdata and appdata ~= "" then
+			rock_roots[#rock_roots + 1] = appdata .. "/luarocks/lib/luarocks/rocks-" .. version
+		end
+		if home ~= "" then
+			rock_roots[#rock_roots + 1] = home .. "/.luarocks/lib/luarocks/rocks-" .. version
+		end
+	else
+		if home ~= "" then
+			rock_roots[#rock_roots + 1] = home .. "/.luarocks/lib/luarocks/rocks-" .. version
+		end
+		rock_roots[#rock_roots + 1] = "/usr/local/lib/luarocks/rocks-" .. version
+		rock_roots[#rock_roots + 1] = "/usr/lib/luarocks/rocks-" .. version
+	end
 
 	for _, root in ipairs(rock_roots) do
 		if root and root ~= "" then
 			local package_root = root .. "/" .. rock_name
-			local pipe = io.popen('ls -1 "' .. package_root .. '" 2>/dev/null')
-			if pipe then
-				for version_dir in pipe:lines() do
-					if version_dir ~= "" then
-						local candidates = {
-							package_root .. "/" .. version_dir .. "/" .. module_rel .. ".clua",
-							package_root .. "/" .. version_dir .. "/" .. module_rel .. "/init.clua",
-						}
-						for _, candidate in ipairs(candidates) do
-							local file = io.open(candidate, "r")
-							if file then
-								file:close()
-								pipe:close()
-								return candidate
-							end
-						end
+			for _, version_dir in ipairs(list_subdirs(package_root)) do
+				local candidates = {
+					package_root .. "/" .. version_dir .. "/" .. module_rel .. ".clua",
+					package_root .. "/" .. version_dir .. "/" .. module_rel .. "/init.clua",
+				}
+				for _, candidate in ipairs(candidates) do
+					local file = io.open(candidate, "r")
+					if file then
+						file:close()
+						return candidate
 					end
 				end
-				pipe:close()
 			end
 		end
 	end
@@ -599,7 +649,7 @@ local function infer_expression_type_semantic(expr, semantic_model, class_info, 
 	return nil
 end
 
-local build_semantic_model_from_lines  -- forward declaration (recursive)
+local build_semantic_model_from_lines -- forward declaration (recursive)
 
 build_semantic_model_from_lines = function(lines, chunk_name, module_cache, loading)
 	local model = {
@@ -682,12 +732,8 @@ build_semantic_model_from_lines = function(lines, chunk_name, module_cache, load
 				if resolved_path then
 					local source = read_file_text(resolved_path)
 					if source then
-						module_cache[normalized_module] = build_semantic_model_from_lines(
-							split_lines(source),
-							resolved_path,
-							module_cache,
-							loading
-						)
+						module_cache[normalized_module] =
+							build_semantic_model_from_lines(split_lines(source), resolved_path, module_cache, loading)
 					end
 				end
 				loading[normalized_module] = nil
@@ -732,9 +778,12 @@ local function validate_semantic_method_calls(lines, chunk_name)
 						local field_info = class_info.fields[method_call.field_name]
 						if field_info then
 							local target_class = resolve_class_by_type_semantic(field_info.type_name, semantic_model)
-							local overload_candidates = get_method_overloads_semantic(target_class, method_call.method_name)
+							local overload_candidates =
+								get_method_overloads_semantic(target_class, method_call.method_name)
 							if #overload_candidates > 0 then
-								local args = method_call.args_text ~= "" and split_top_level_commas(method_call.args_text) or {}
+								local args = method_call.args_text ~= ""
+										and split_top_level_commas(method_call.args_text)
+									or {}
 								if not args then
 									args = {}
 								end
@@ -743,14 +792,20 @@ local function validate_semantic_method_calls(lines, chunk_name)
 								local matched_overload = false
 								for _, overload in ipairs(overload_candidates) do
 									if #overload.params == #args then
-										local type_param_map = build_type_param_map_from_type_ref(field_info.type_name, target_class)
+										local type_param_map =
+											build_type_param_map_from_type_ref(field_info.type_name, target_class)
 										local overload_matches = true
 
 										for arg_index, arg_expr in ipairs(args) do
 											local param_info = overload.params[arg_index]
-											local expected_type = apply_type_param_map(param_info.type_name, type_param_map)
-											local inferred_type = infer_expression_type_semantic(arg_expr, semantic_model, class_info, method_context)
-												or infer_literal_type(arg_expr)
+											local expected_type =
+												apply_type_param_map(param_info.type_name, type_param_map)
+											local inferred_type = infer_expression_type_semantic(
+												arg_expr,
+												semantic_model,
+												class_info,
+												method_context
+											) or infer_literal_type(arg_expr)
 
 											if not expression_matches_declared_type(inferred_type, expected_type) then
 												overload_matches = false
@@ -773,20 +828,20 @@ local function validate_semantic_method_calls(lines, chunk_name)
 								end
 
 								if not matched_overload and mismatch then
-									local file_label = type(chunk_name) == "string"
-										and chunk_name:gsub("^@", "") .. ":"
+									local file_label = type(chunk_name) == "string" and chunk_name:gsub("^@", "") .. ":"
 										or ""
-									error((
-										"%s%d: Argument %d to %s.%s expects %s, got %s"
-									):format(
-										file_label,
-										line_no,
-										mismatch.arg_index,
-										field_info.type_name,
-										method_call.method_name,
-										mismatch.expected_type,
-										mismatch.inferred_type or "unknown"
-									), 0)
+									error(
+										("%s%d: Argument %d to %s.%s expects %s, got %s"):format(
+											file_label,
+											line_no,
+											mismatch.arg_index,
+											field_info.type_name,
+											method_call.method_name,
+											mismatch.expected_type,
+											mismatch.inferred_type or "unknown"
+										),
+										0
+									)
 								end
 							end
 						end
@@ -795,7 +850,12 @@ local function validate_semantic_method_calls(lines, chunk_name)
 					local local_info = parse_semantic_local(body_line)
 					if local_info then
 						method_context.locals[local_info.name] = local_info.type_name
-							or infer_expression_type_semantic(local_info.default_expr, semantic_model, class_info, method_context)
+							or infer_expression_type_semantic(
+								local_info.default_expr,
+								semantic_model,
+								class_info,
+								method_context
+							)
 							or infer_literal_type(local_info.default_expr)
 					end
 				end

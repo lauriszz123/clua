@@ -252,6 +252,40 @@ function addVersionedLuaRoots(roots, seen, baseDir) {
 	}
 }
 
+function getUserLuaRocksShareRoots() {
+	const roots = [];
+	const home = process.env.HOME || process.env.USERPROFILE || "";
+	const appData = process.env.APPDATA || "";
+
+	for (const version of ["5.1", "5.2", "5.3", "5.4", "5.5"]) {
+		if (home) {
+			roots.push(path.join(home, ".luarocks", "share", "lua", version));
+		}
+		if (appData) {
+			roots.push(path.join(appData, "luarocks", "share", "lua", version));
+		}
+	}
+
+	return Array.from(new Set(roots));
+}
+
+function getUserLuaRocksTreeRoots() {
+	const roots = [];
+	const home = process.env.HOME || process.env.USERPROFILE || "";
+	const appData = process.env.APPDATA || "";
+
+	for (const version of ["5.1", "5.2", "5.3", "5.4", "5.5"]) {
+		if (home) {
+			roots.push(path.join(home, ".luarocks", "lib", "luarocks", `rocks-${version}`));
+		}
+		if (appData) {
+			roots.push(path.join(appData, "luarocks", "lib", "luarocks", `rocks-${version}`));
+		}
+	}
+
+	return Array.from(new Set(roots));
+}
+
 function addConventionalProjectRoots(roots, seen, projectRoot) {
 	if (!projectRoot) {
 		return;
@@ -300,15 +334,8 @@ function getModuleSearchRoots(activeUri, workspaceFolders) {
 		}
 	}
 
-	const home = process.env.HOME || process.env.USERPROFILE || "";
-	if (home) {
-		for (const version of ["5.1", "5.2", "5.3", "5.4", "5.5"]) {
-			addRoot(
-				roots,
-				seen,
-				path.join(home, ".luarocks", "share", "lua", version),
-			);
-		}
+	for (const root of getUserLuaRocksShareRoots()) {
+		addRoot(roots, seen, root);
 	}
 
 	for (const root of parseLuaPathRoots(process.env.LUA_PATH)) {
@@ -366,13 +393,8 @@ function resolveModulePathToFile(
 	}
 
 	const rocksRoots = [];
-	const home = process.env.HOME || process.env.USERPROFILE || "";
-	if (home) {
-		for (const version of ["5.1", "5.2", "5.3", "5.4", "5.5"]) {
-			rocksRoots.push(
-				path.join(home, ".luarocks", "lib", "luarocks", `rocks-${version}`),
-			);
-		}
+	for (const root of getUserLuaRocksTreeRoots()) {
+		rocksRoots.push(root);
 	}
 
 	for (const folderUri of workspaceFolders || []) {

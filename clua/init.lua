@@ -82,28 +82,67 @@ local function file_exists(path)
 	return false
 end
 
+local function dir_exists(path)
+	if not path or path == "" then
+		return false
+	end
+
+	if package.config:sub(1, 1) == "\\" then
+		local normalized = path:gsub("/", "\\")
+		local command = 'cmd /c if exist "' .. normalized .. '" (echo 1) else (echo 0)'
+		local pipe = io.popen(command)
+		if not pipe then
+			return false
+		end
+		local out = pipe:read("*l") or ""
+		pipe:close()
+		return out:match("^%s*1%s*$") ~= nil
+	end
+
+	local ok = os.rename(path, path)
+	return ok ~= nil
+end
+
 local function default_rock_roots()
 	local version = lua_version_suffix()
+	local is_windows = package.config:sub(1, 1) == "\\"
 	local roots = {
 		"./.luarocks/lib/luarocks/rocks-" .. version,
-		"./lib/lib/luarocks/rocks-" .. version,
 	}
+
+	if not is_windows then
+		roots[#roots + 1] = "./lib/lib/luarocks/rocks-" .. version
+	end
+
+	if is_windows then
+		local appdata = os.getenv("APPDATA")
+		if appdata and appdata ~= "" then
+			roots[#roots + 1] = appdata .. "/luarocks/lib/luarocks/rocks-" .. version
+		end
+	end
 
 	local home = os.getenv("HOME") or os.getenv("USERPROFILE")
 	if home and home ~= "" then
 		roots[#roots + 1] = home .. "/.luarocks/lib/luarocks/rocks-" .. version
 	end
 
-	roots[#roots + 1] = "/usr/local/lib/luarocks/rocks-" .. version
-	roots[#roots + 1] = "/usr/lib/luarocks/rocks-" .. version
+	if not is_windows then
+		roots[#roots + 1] = "/usr/local/lib/luarocks/rocks-" .. version
+		roots[#roots + 1] = "/usr/lib/luarocks/rocks-" .. version
+	end
 
 	return roots
 end
 
 local function list_subdirs(path)
+	if not dir_exists(path) then
+		return {}
+	end
+
 	local command
 	if package.config:sub(1, 1) == "\\" then
-		command = 'dir /b /ad "' .. path .. '" 2>nul'
+		local normalized = path:gsub("/", "\\")
+		command = 'dir /b /ad "' .. normalized .. '" 2>nul'
 	else
 		command = 'ls -1 "' .. path .. '" 2>/dev/null'
 	end
