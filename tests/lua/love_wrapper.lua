@@ -2,6 +2,10 @@
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
+local testlib = require("tests.lua.testlib")
+
+testlib.setup_package_path()
+
 require("clua")
 
 local function test(name, fn)
@@ -53,5 +57,31 @@ then
 	passed = passed + 1
 end
 
+total = total + 1
+if
+	test("bind only exposes implemented callbacks", function()
+		local Main = assert(require("clua").loadstring([[class Main extends Love
+	function new()
+		self.drawn = false
+	end
+
+	function draw()
+		self.drawn = true
+	end
+end]]))()
+
+		local fake_love = {}
+		local bridge = require("clua.love")
+		local app = bridge.bind(Main, { love = fake_love })
+
+		assert(type(fake_love.draw) == "function")
+		assert(fake_love.update == nil)
+		fake_love.draw()
+		assert(app.drawn == true)
+	end)
+then
+	passed = passed + 1
+end
+
 print(("%d/%d tests passed"):format(passed, total))
-os.exit(passed == total and 0 or 1)
+return passed == total

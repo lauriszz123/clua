@@ -22,7 +22,7 @@ local function block_delta(line)
 	local delta = 0
 
 	for token in text:gmatch("%f[%a]([%a_]+)%f[%A]") do
-		if token == "function" or token == "then" or token == "do" or token == "repeat" then
+		if token == "function" or token == "then" or token == "do" or token == "repeat" or token == "try" then
 			delta = delta + 1
 		elseif token == "end" or token == "until" then
 			delta = delta - 1
@@ -52,8 +52,7 @@ local function parse_function_signature(signature)
 	if function_name then
 		is_local = true
 	else
-		function_name, generic_capture, params_start =
-			signature:match("^%s*function%s+([%a_][%w_]*)(%b<>)%s*()%(.*$")
+		function_name, generic_capture, params_start = signature:match("^%s*function%s+([%a_][%w_]*)(%b<>)%s*()%(.*$")
 	end
 
 	if not function_name then

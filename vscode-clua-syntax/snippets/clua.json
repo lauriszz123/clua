@@ -43,5 +43,40 @@
       "__clua_runtime.assert_type(${1:value}, \"${2:number}\", \"${3:where}\")"
     ],
     "description": "Insert a CLua runtime type assertion"
+  },
+  "Try Catch": {
+    "prefix": "try",
+    "body": [
+      "try",
+      "\t${1}",
+      "catch ${2:err}",
+      "\t${0}",
+      "end"
+    ],
+    "description": "Create a CLua try/catch block"
+  },
+  "Try Finally": {
+    "prefix": "tryf",
+    "body": [
+      "try",
+      "\t${1}",
+      "finally",
+      "\t${0}",
+      "end"
+    ],
+    "description": "Create a CLua try/finally block"
+  },
+  "Try Catch Finally": {
+    "prefix": "trycf",
+    "body": [
+      "try",
+      "\t${1}",
+      "catch ${2:err}",
+      "\t${3}",
+      "finally",
+      "\t${0}",
+      "end"
+    ],
+    "description": "Create a CLua try/catch/finally block"
   }
 }

@@ -1,8 +1,12 @@
 #!/usr/bin/env lua
 -- Integration test: compile and run generic CLua code
--- Run with: lua test_generics_integration.lua
+-- Run with: lua tests/lua/run_all.lua
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+
+local testlib = require("tests.lua.testlib")
+
+testlib.setup_package_path()
 
 local compiler = require("clua.compiler")
 local runtime = require("clua.runtime")
@@ -27,14 +31,7 @@ local function has(str, substring)
 end
 
 local function with_temp_dir(fn)
-	local base = os.tmpname()
-	os.remove(base)
-	assert(os.execute('mkdir -p "' .. base .. '"') == true or os.execute('mkdir -p "' .. base .. '"') == 0)
-	local ok, err = pcall(fn, base)
-	os.execute('rm -rf "' .. base .. '"')
-	if not ok then
-		error(err)
-	end
+	return testlib.with_temp_dir(fn)
 end
 
 -- ============================================================================
@@ -44,22 +41,27 @@ passed = passed
 	+ (
 		test("Searcher resolves clua.std.List from rocks tree layout", function()
 				with_temp_dir(function(temp_dir)
-					local list_path = temp_dir .. "/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std/List.clua"
-					assert(
-						os.execute('mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"')
-								== true
-							or os.execute(
-									'mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"'
-								)
-								== 0
+					local list_dir = testlib.join_path(
+						temp_dir,
+						".luarocks",
+						"lib",
+						"luarocks",
+						"rocks-5.4",
+						"clua",
+						"scm-1",
+						"clua",
+						"std"
 					)
-					local file = assert(io.open(list_path, "w"))
-					file:write([[class List<T>
+					testlib.mkdir_p(list_dir)
+					local list_path = testlib.join_path(list_dir, "List.clua")
+					testlib.write_file(
+						list_path,
+						[[class List<T>
 	function new()
 	end
 end
-]])
-					file:close()
+]]
+					)
 
 					local searcher = clua.make_searcher({
 						path = "",
@@ -67,7 +69,10 @@ end
 					})
 					local chunk, resolved = searcher("clua.std.List")
 					assert(type(chunk) == "function", "Searcher should return loader function")
-					assert(resolved == list_path, "Searcher should resolve rocks-tree std module path")
+					assert(
+						resolved:gsub("[/\\]", "/") == list_path:gsub("[/\\]", "/"),
+						"Searcher should resolve rocks-tree std module path"
+					)
 					local List = chunk()
 					assert(List and List.new, "Resolved module should return List class")
 				end)
@@ -114,6 +119,34 @@ end
 -- ============================================================================
 -- Test: Compiler/runtime type mismatch on ArrayList.get(index:number)
 -- ============================================================================
+passed = passed
+	+ (
+		test("Runtime import std.Option resolves and unwrapOr works", function()
+				local chunk, err = clua.loadstring(
+					[[import std.Option
+
+class App
+	function new()
+	end
+
+	function run(): number
+		local value: Option<number> = new Option<number>()
+		return value.unwrapOr(7)
+	end
+end]],
+					"@option_runtime_test.clua"
+				)
+				assert(chunk, err)
+				local App = chunk()
+				local app = App.new()
+				assert(app.run() == 7)
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+
 passed = passed
 	+ (
 		test("Runtime type mismatch remains for dynamic ArrayList.get index", function()
@@ -717,6 +750,4 @@ print("Tests failed: " .. failed)
 print("Total: " .. (passed + failed))
 print("========================")
 
-if failed > 0 then
-	os.exit(1)
-end
+return failed == 0

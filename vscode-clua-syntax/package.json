@@ -11,6 +11,8 @@
     "vscode": "^1.85.0"
   },
   "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:lsp": "node --test tests/lsp-helpers.test.js tests/completion.test.js tests/formatter.test.js",
     "package": "node ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --skip-license",
     "package:out": "node ./node_modules/@vscode/vsce/vsce package --allow-missing-repository --skip-license -o clua-syntax.vsix"
   },

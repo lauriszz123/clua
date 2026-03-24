@@ -46,6 +46,7 @@ luarocks pack clua-scm-1.rockspec
 - Typed fields inside class blocks (for example `var x: number`)
 - Typed method parameters inside class blocks
 - `function new(...)` constructor lowering to `Class.new(...)`
+- `try/catch` lowering to `pcall(...)`
 - `require("module")` can load `module.clua` directly once `require("clua")` is called
 
 ## Portable Standard Library
@@ -88,6 +89,35 @@ class Test
     end
 end
 ```
+
+`try/catch/finally` example:
+
+```clua
+function readConfig(): string
+  try
+    error("missing config")
+  catch err
+    print("recovering from: " .. tostring(err))
+    return "default"
+  finally
+    print("cleanup")
+  end
+end
+```
+
+`try/finally` without `catch` is also supported:
+
+```clua
+function withCleanup()
+  try
+    print("work")
+  finally
+    print("always runs")
+  end
+end
+```
+
+`try/catch/finally` is useful for bridging Lua errors, while `Option` and `Result` are still useful for explicit, typed control flow in application code.
 
 ## Love2D setup
 
@@ -145,3 +175,8 @@ end
 - Imports like `import std.List` are resolved against installed module trees (global LuaRocks, project `.luarocks`, and common project folders like `lib/` and `vendor/`).
 - This is intentionally minimal and line-based, so class bodies should contain only field declarations and methods.
 - Inheritance is not supported yet.
+
+## Tests
+
+- CLua runtime/compiler suites: `lua tests/lua/run_all.lua`
+- VS Code language server and language asset suites: `cd vscode-clua-syntax && npm test`

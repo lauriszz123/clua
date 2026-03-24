@@ -66,23 +66,23 @@
   ],
   "folding": {
     "markers": {
-      "start": "^\\s*(class|enum|function|if|for|while|repeat)\\b",
-      "end": "^\\s*(end|until)\\b"
+      "start": "^\\s*(class|enum|function|if|for|while|repeat|try|catch|finally)\\b",
+      "end": "^\\s*(catch|finally|end|until)\\b"
     }
   },
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(class\\b|enum\\b|((local\\s+)?function\\b)|if\\b.*\\bthen\\b|else\\b|elseif\\b.*\\bthen\\b|for\\b.*\\bdo\\b|while\\b.*\\bdo\\b|repeat\\b|do\\b).*$",
-    "decreaseIndentPattern": "^\\s*(end\\b|until\\b|else\\b|elseif\\b).*"
+    "increaseIndentPattern": "^\\s*(class\\b|enum\\b|((local\\s+)?function\\b)|if\\b.*\\bthen\\b|else\\b|elseif\\b.*\\bthen\\b|for\\b.*\\bdo\\b|while\\b.*\\bdo\\b|repeat\\b|do\\b|try\\b|catch\\b|finally\\b).*$",
+    "decreaseIndentPattern": "^\\s*(end\\b|until\\b|else\\b|elseif\\b|catch\\b|finally\\b).*"
   },
   "onEnterRules": [
     {
-      "beforeText": "^\\s*(class\\b|enum\\b|((local\\s+)?function\\b)|if\\b.*\\bthen\\b|else\\b|elseif\\b.*\\bthen\\b|for\\b.*\\bdo\\b|while\\b.*\\bdo\\b|repeat\\b|do\\b).*$",
+      "beforeText": "^\\s*(class\\b|enum\\b|((local\\s+)?function\\b)|if\\b.*\\bthen\\b|else\\b|elseif\\b.*\\bthen\\b|for\\b.*\\bdo\\b|while\\b.*\\bdo\\b|repeat\\b|do\\b|try\\b|catch\\b|finally\\b).*$",
       "action": {
         "indentAction": "indent"
       }
     },
     {
-      "beforeText": "^\\s*(end\\b|until\\b).*$",
+      "beforeText": "^\\s*(catch\\b|finally\\b|end\\b|until\\b).*$",
       "action": {
         "indentAction": "outdent"
       }

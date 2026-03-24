@@ -14,6 +14,7 @@ local parse_generic_param_map = typesys.parse_generic_param_map
 local merge_generic_param_maps = typesys.merge_generic_param_maps
 
 local find_block_end = parser.find_block_end
+local block_delta = parser.block_delta
 local parse_function_signature = parser.parse_function_signature
 local parse_params = parser.parse_params
 local parse_field = parser.parse_field
@@ -65,6 +66,71 @@ end
 
 local strip_typed_local_annotation
 local emit_body_with_field_checks
+local emit_statement_lines
+
+local internal_symbol_counter = 0
+
+local function next_internal_name(prefix)
+	internal_symbol_counter = internal_symbol_counter + 1
+	return ("__clua_%s_%d"):format(prefix, internal_symbol_counter)
+end
+
+local function parse_catch_header(line)
+	local name = line:match("^%s*catch%s+([A-Za-z_][A-Za-z0-9_]*)%s*$")
+	if name then
+		return name
+	end
+
+	if line:match("^%s*catch%s*$") then
+		return nil
+	end
+
+	return false
+end
+
+local function parse_finally_header(line)
+	if line:match("^%s*finally%s*$") then
+		return true
+	end
+
+	return false
+end
+
+local function find_try_catch_bounds(lines, start_idx, end_limit)
+	local depth = 1
+	local catch_idx = nil
+	local finally_idx = nil
+	local limit = end_limit or #lines
+
+	for i = start_idx + 1, limit do
+		local catch_name = parse_catch_header(lines[i])
+		local is_finally = parse_finally_header(lines[i])
+		if depth == 1 and catch_name ~= false then
+			if finally_idx then
+				error(("catch cannot appear after finally for try at line %d"):format(start_idx))
+			end
+			if catch_idx then
+				error(("Multiple catch blocks for try at line %d"):format(start_idx))
+			end
+			catch_idx = i
+		elseif depth == 1 and is_finally then
+			if finally_idx then
+				error(("Multiple finally blocks for try at line %d"):format(start_idx))
+			end
+			finally_idx = i
+		end
+
+		depth = depth + block_delta(lines[i])
+		if depth == 0 then
+			if not catch_idx and not finally_idx then
+				error(("try block at line %d requires a catch or finally block"):format(start_idx))
+			end
+			return catch_idx, finally_idx, i
+		end
+	end
+
+	error(("Unclosed try block starting at line %d"):format(start_idx))
+end
 
 -- --------------------------------------------------------------------------
 -- Enum compiler
@@ -204,12 +270,8 @@ local function compile_standalone_function(lines, start_idx)
 			("%s(%s)"):format(function_name, info.name)
 		)
 	end
-	for _, line in ipairs(body) do
-		local rewritten = rewrite_import_statement(line)
-		rewritten = strip_typed_local_annotation(rewritten)
-		rewritten = rewrite_new_expressions(rewritten)
-		out[#out + 1] = rewritten
-	end
+
+	emit_statement_lines(out, body, 1, #body, nil, nil, function_name, nil)
 	out[#out + 1] = "end"
 	out[#out + 1] = ""
 
@@ -389,31 +451,141 @@ strip_typed_local_annotation = function(line)
 	return line
 end
 
-emit_body_with_field_checks = function(out, body, fields_by_name, private_fields, class_name, method_name)
-	for _, line in ipairs(body) do
-		local rewritten = rewrite_new_expressions(rewrite_private_field_access(line, private_fields))
-		rewritten = strip_typed_local_annotation(rewritten)
-		out[#out + 1] = rewritten
+local function emit_field_assert_if_needed(out, rewritten, fields_by_name, class_name, method_name)
+	if not fields_by_name then
+		return
+	end
 
-		local indent, field_name = rewritten:match("^(%s*)self%.([%a_][%w_]*)%s*=%s*.+$")
-		local target_prefix = "self"
-		if not field_name then
-			indent, field_name = rewritten:match("^(%s*)__priv%.([%a_][%w_]*)%s*=%s*.+$")
-			target_prefix = "__priv"
-		end
-		if field_name then
-			local field = fields_by_name[field_name]
-			if field and field.type_name and field.type_name ~= "" then
-				out[#out + 1] = ("%s__clua_runtime.assert_type(%s.%s, %q, %q)"):format(
-					indent,
-					target_prefix,
-					field_name,
-					field.type_name,
-					("%s.%s(%s)"):format(class_name, method_name, field_name)
-				)
-			end
+	local indent, field_name = rewritten:match("^(%s*)self%.([%a_][%w_]*)%s*=%s*.+$")
+	local target_prefix = "self"
+	if not field_name then
+		indent, field_name = rewritten:match("^(%s*)__priv%.([%a_][%w_]*)%s*=%s*.+$")
+		target_prefix = "__priv"
+	end
+	if field_name then
+		local field = fields_by_name[field_name]
+		if field and field.type_name and field.type_name ~= "" then
+			out[#out + 1] = ("%s__clua_runtime.assert_type(%s.%s, %q, %q)"):format(
+				indent,
+				target_prefix,
+				field_name,
+				field.type_name,
+				("%s.%s(%s)"):format(class_name, method_name, field_name)
+			)
 		end
 	end
+end
+
+local function emit_try_catch_block(
+	out,
+	lines,
+	start_idx,
+	catch_idx,
+	finally_idx,
+	end_idx,
+	fields_by_name,
+	private_fields,
+	class_name,
+	method_name
+)
+	local indent = lines[start_idx]:match("^(%s*)") or ""
+	local catch_name = catch_idx and parse_catch_header(lines[catch_idx]) or nil
+	local result_name = next_internal_name("result")
+	local ok_name = next_internal_name("ok")
+	local err_name = next_internal_name("err")
+	local bound_error_name = (catch_idx and (catch_name or next_internal_name("caught"))) or nil
+	local try_end_idx = ((catch_idx or finally_idx) or end_idx) - 1
+	local catch_end_idx = finally_idx and (finally_idx - 1) or (end_idx - 1)
+
+	out[#out + 1] = indent .. "do"
+	out[#out + 1] = indent .. ("  local %s = table.pack(pcall(function()"):format(result_name)
+	emit_statement_lines(
+		out,
+		lines,
+		start_idx + 1,
+		try_end_idx,
+		fields_by_name,
+		private_fields,
+		class_name,
+		method_name
+	)
+	out[#out + 1] = indent .. "  end))"
+	out[#out + 1] = indent .. ("  local %s = %s[1]"):format(ok_name, result_name)
+	out[#out + 1] = indent .. ("  local %s = %s[2]"):format(err_name, result_name)
+	if catch_idx then
+		out[#out + 1] = indent .. ("  if not %s then"):format(ok_name)
+		out[#out + 1] = indent .. ("    local %s = %s"):format(bound_error_name, err_name)
+		emit_statement_lines(
+			out,
+			lines,
+			catch_idx + 1,
+			catch_end_idx,
+			fields_by_name,
+			private_fields,
+			class_name,
+			method_name
+		)
+		out[#out + 1] = indent .. "  end"
+	end
+	if finally_idx then
+		emit_statement_lines(
+			out,
+			lines,
+			finally_idx + 1,
+			end_idx - 1,
+			fields_by_name,
+			private_fields,
+			class_name,
+			method_name
+		)
+	end
+	if not catch_idx then
+		out[#out + 1] = indent .. ("  if not %s then"):format(ok_name)
+		out[#out + 1] = indent .. ("    error(%s, 0)"):format(err_name)
+		out[#out + 1] = indent .. "  end"
+	end
+	out[#out + 1] = indent .. ("  if %s and %s.n > 1 then"):format(ok_name, result_name)
+	out[#out + 1] = indent
+		.. ("    return ((table and table.unpack) or unpack)(%s, 2, %s.n)"):format(result_name, result_name)
+	out[#out + 1] = indent .. "  end"
+	out[#out + 1] = indent .. "end"
+end
+
+emit_statement_lines = function(out, lines, start_idx, end_idx, fields_by_name, private_fields, class_name, method_name)
+	if not lines or start_idx > end_idx then
+		return
+	end
+
+	local i = start_idx
+	while i <= end_idx do
+		local line = lines[i]
+		if line:match("^%s*try%s*$") then
+			local catch_idx, finally_idx, block_end = find_try_catch_bounds(lines, i, end_idx)
+			emit_try_catch_block(
+				out,
+				lines,
+				i,
+				catch_idx,
+				finally_idx,
+				block_end,
+				fields_by_name,
+				private_fields,
+				class_name,
+				method_name
+			)
+			i = block_end + 1
+		else
+			local rewritten = rewrite_new_expressions(rewrite_private_field_access(line, private_fields or {}))
+			rewritten = strip_typed_local_annotation(rewritten)
+			out[#out + 1] = rewritten
+			emit_field_assert_if_needed(out, rewritten, fields_by_name, class_name, method_name)
+			i = i + 1
+		end
+	end
+end
+
+emit_body_with_field_checks = function(out, body, fields_by_name, private_fields, class_name, method_name)
+	emit_statement_lines(out, body, 1, #body, fields_by_name, private_fields, class_name, method_name)
 end
 
 -- --------------------------------------------------------------------------
@@ -670,6 +842,7 @@ end
 
 function M.compile(source, chunk_name)
 	local lines = split_lines(source)
+	internal_symbol_counter = 0
 	validate_semantic_method_calls(lines, chunk_name)
 	local out = {}
 	local saw_class = false
@@ -717,6 +890,10 @@ function M.compile(source, chunk_name)
 				out[#out + 1] = stripped
 				i = i + 1
 			end
+		elseif line:match("^%s*try%s*$") then
+			local catch_idx, finally_idx, block_end = find_try_catch_bounds(lines, i)
+			emit_try_catch_block(out, lines, i, catch_idx, finally_idx, block_end, nil, nil, nil, nil)
+			i = block_end + 1
 		else
 			assert_no_private_method_access(line, i, private_methods_by_class)
 			local stripped = strip_typed_locals(line)

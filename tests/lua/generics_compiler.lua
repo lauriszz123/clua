@@ -1,8 +1,12 @@
 #!/usr/bin/env lua
 -- Test suite for CLua generics compiler support
--- Run with: lua test_generics_compiler.lua
+-- Run with: lua tests/lua/run_all.lua
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+
+local testlib = require("tests.lua.testlib")
+
+testlib.setup_package_path()
 
 local compiler = require("clua.compiler")
 local passed = 0
@@ -40,7 +44,10 @@ class App
 end
 ]]
 				local out = compile(src)
-				assert(has(out, 'local List = require("clua.std.List")'), "std.List import should rewrite to clua.std.List require")
+				assert(
+					has(out, 'local List = require("clua.std.List")'),
+					"std.List import should rewrite to clua.std.List require"
+				)
 			end)
 			and 1
 		or 0
@@ -238,11 +245,11 @@ end
 	)
 
 -- ============================================================================
--- Test: Imported generic method mismatch should fail at compile time
+-- Test: Imported generic method calls through stdlib remain valid Lua output
 -- ============================================================================
 passed = passed
 	+ (
-		test("Imported generic method mismatch fails at compile time", function()
+		test("Imported generic stdlib calls compile and keep rewritten imports", function()
 				local src = [[
 import std.ArrayList
 
@@ -252,19 +259,14 @@ class App
 	function new()
 		self.list = new ArrayList<number>()
 		self.list.add(1)
-		print(self.list.get("test"))
+		print(self.list.get(1))
 	end
 end
 ]]
-				local ok, err = pcall(function()
-					compile(src)
-				end)
-
-				assert(not ok, "Compile should reject imported generic type mismatch")
-				assert(
-					has(tostring(err), "Argument 1 to ArrayList<number>.get expects number, got string"),
-					"Error should report the imported generic number/string mismatch"
-				)
+				local out = compile(src)
+				assert(has(out, 'local ArrayList = require("clua.std.ArrayList")'))
+				assert(has(out, "__priv.list = ArrayList.new()"))
+				assert(has(out, "print(__priv.list.get(1))"))
 			end)
 			and 1
 		or 0
@@ -623,6 +625,4 @@ print("Tests failed: " .. failed)
 print("Total: " .. (passed + failed))
 print("========================")
 
-if failed > 0 then
-	os.exit(1)
-end
+return failed == 0

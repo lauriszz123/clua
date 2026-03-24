@@ -173,6 +173,7 @@ function blockDelta(line) {
 			token === "then" ||
 			token === "do" ||
 			token === "repeat" ||
+			token === "try" ||
 			token === "class" ||
 			token === "enum"
 		) {

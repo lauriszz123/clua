@@ -636,7 +636,7 @@
       "patterns": [
         {
           "name": "keyword.control.clua",
-          "match": "\\b(class|enum|var|extends|function|end|if|then|else|elseif|for|while|repeat|until|do|return|break|in|and|or|not|local|new|import)\\b"
+          "match": "\\b(class|enum|var|extends|function|end|if|then|else|elseif|for|while|repeat|until|do|return|break|in|and|or|not|local|new|import|try|catch|finally)\\b"
         }
       ]
     },
