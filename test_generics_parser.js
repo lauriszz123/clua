@@ -7,9 +7,17 @@ const {
 	isKnownType,
 	inferExpressionType,
 } = require("./vscode-clua-syntax/server/parser");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 const {
 	validateTextDocument,
 } = require("./vscode-clua-syntax/server/diagnostics");
+const {
+	pathToFileUri,
+	buildImportSuggestions,
+	resolveModulePathToFile,
+} = require("./vscode-clua-syntax/server/workspace");
 
 let passed = 0;
 let failed = 0;
@@ -191,6 +199,70 @@ end
 	const diags = validateTextDocument(doc, new Map());
 
 	isEmpty(diags, "Should have no diagnostics for valid generics");
+});
+
+// ============================================================================
+// Test: Parser tracks import module path and terminal symbol
+// ============================================================================
+test("Parse imports include module and terminal symbol", function () {
+	const src = `
+import std.List
+import clua.std.ArrayList
+
+class App
+end
+`;
+	const model = buildModel(src);
+	assert(model.imports, "Model should include imports set");
+	assert(model.imports.has("std.List"), "Should include full module path");
+	assert(model.imports.has("List"), "Should include terminal symbol List");
+	assert(
+		model.imports.has("clua.std.ArrayList"),
+		"Should include fully qualified module path",
+	);
+	assert(
+		model.imports.has("ArrayList"),
+		"Should include terminal symbol ArrayList",
+	);
+});
+
+// ============================================================================
+// Test: Diagnostics accept imported terminal type names
+// ============================================================================
+test("Diagnostics accept imported terminal type alias", function () {
+	const src = `
+import std.List
+
+class App
+  local list: List
+end
+`;
+	const doc = { getText: () => src };
+	const diags = validateTextDocument(doc, new Map());
+	isEmpty(diags, "Imported List type should be treated as known");
+});
+
+// ============================================================================
+// Test: Diagnostics report unresolved imports when resolver cannot find module
+// ============================================================================
+test("Diagnostics flag unresolved import", function () {
+	const src = `
+import std.DoesNotExist
+
+class App
+  local list: DoesNotExist
+end
+`;
+	const doc = { getText: () => src };
+	const diags = validateTextDocument(doc, new Map(), {
+		resolveImport: () => null,
+	});
+
+	has(
+		diags,
+		(d) => d.message.includes("Cannot resolve import std.DoesNotExist"),
+		"Should report unresolved import",
+	);
 });
 
 // ============================================================================
@@ -629,6 +701,195 @@ end
 
 	const inferred = inferExpressionType("ball", model, main, update, new Map());
 	eq(inferred, "Ball", "Expression type for ball should resolve to Ball");
+});
+
+// ============================================================================
+// Test: Import suggestions include packaged std modules
+// ============================================================================
+test("Import suggestions include clua.std.List", function () {
+	const rootUri = pathToFileUri(__dirname);
+	const suggestions = buildImportSuggestions(null, [rootUri]);
+	assert(
+		suggestions.has("clua.std.List"),
+		"Workspace import suggestions should include clua.std.List",
+	);
+});
+
+// ============================================================================
+// Test: direct module resolver finds std modules from arbitrary workspace roots
+// ============================================================================
+test("Resolve std.List module path to file", function () {
+	const rootUri = pathToFileUri(__dirname);
+	const resolved = resolveModulePathToFile("std.List", null, [rootUri]);
+	assert(resolved, "Resolver should return a file path for std.List");
+	assert(
+		resolved.replace(/\\/g, "/").endsWith("/clua/std/List.clua"),
+		"Resolved path should point to clua/std/List.clua",
+	);
+});
+
+// ============================================================================
+// Test: direct module resolver handles fully-qualified clua.std imports
+// ============================================================================
+test("Resolve clua.std.List module path to file", function () {
+	const rootUri = pathToFileUri(__dirname);
+	const resolved = resolveModulePathToFile("clua.std.List", null, [rootUri]);
+	assert(resolved, "Resolver should return a file path for clua.std.List");
+});
+
+// ============================================================================
+// Test: External workspace with unresolved import should raise import diagnostic
+// ============================================================================
+test("External workspace reports unresolved import diagnostic", function () {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clua-lsp-ext-"));
+	try {
+		const appPath = path.join(tempRoot, "src", "app.clua");
+		fs.mkdirSync(path.dirname(appPath), { recursive: true });
+		const src = [
+			"import std.List",
+			"",
+			"class App",
+			"  local list: List",
+			"end",
+		].join("\n");
+		fs.writeFileSync(appPath, src, "utf8");
+
+		const appUri = pathToFileUri(appPath);
+		const wsUri = pathToFileUri(tempRoot);
+		const doc = { getText: () => src };
+
+		const diags = validateTextDocument(doc, new Map(), {
+			resolveImport: (modulePath) => {
+				const resolvedPath = resolveModulePathToFile(modulePath, appUri, [
+					wsUri,
+				]);
+				if (!resolvedPath) {
+					return null;
+				}
+				const text = fs.readFileSync(resolvedPath, "utf8");
+				return {
+					targetUri: pathToFileUri(resolvedPath),
+					targetModel: buildModel(text),
+				};
+			},
+		});
+
+		has(
+			diags,
+			(d) => d.message.includes("Cannot resolve import std.List"),
+			"Should flag unresolved import in external workspace",
+		);
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
+});
+
+// ============================================================================
+// Test: External workspace resolves import from local .luarocks tree
+// ============================================================================
+test("External workspace resolves std.List from local .luarocks", function () {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clua-lsp-ext-"));
+	try {
+		const appPath = path.join(tempRoot, "src", "app.clua");
+		const listPath = path.join(
+			tempRoot,
+			".luarocks",
+			"share",
+			"lua",
+			"5.4",
+			"clua",
+			"std",
+			"List.clua",
+		);
+
+		fs.mkdirSync(path.dirname(appPath), { recursive: true });
+		fs.mkdirSync(path.dirname(listPath), { recursive: true });
+		fs.writeFileSync(
+			appPath,
+			["import std.List", "", "class App", "  local list: List", "end"].join(
+				"\n",
+			),
+			"utf8",
+		);
+		fs.writeFileSync(
+			listPath,
+			["class List<T>", "  local items: table<string, T>", "end"].join("\n"),
+			"utf8",
+		);
+
+		const appUri = pathToFileUri(appPath);
+		const wsUri = pathToFileUri(tempRoot);
+		const resolvedPath = resolveModulePathToFile("std.List", appUri, [wsUri]);
+		assert(
+			resolvedPath,
+			"Resolver should find std.List in local .luarocks tree",
+		);
+
+		const src = fs.readFileSync(appPath, "utf8");
+		const doc = { getText: () => src };
+		const diags = validateTextDocument(doc, new Map(), {
+			resolveImport: (modulePath) => {
+				const p = resolveModulePathToFile(modulePath, appUri, [wsUri]);
+				if (!p) {
+					return null;
+				}
+				const text = fs.readFileSync(p, "utf8");
+				return { targetUri: pathToFileUri(p), targetModel: buildModel(text) };
+			},
+		});
+
+		assert(
+			!diags.some((d) => d.message.includes("Cannot resolve import std.List")),
+			"Should not report unresolved import when module is in local .luarocks",
+		);
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
+});
+
+// ============================================================================
+// Test: External workspace resolves std.List from project-local lib tree
+// ============================================================================
+test("External workspace resolves std.List from lib/share/lua", function () {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clua-lsp-ext-"));
+	try {
+		const appPath = path.join(tempRoot, "src", "app.clua");
+		const listPath = path.join(
+			tempRoot,
+			"lib",
+			"share",
+			"lua",
+			"5.4",
+			"clua",
+			"std",
+			"List.clua",
+		);
+
+		fs.mkdirSync(path.dirname(appPath), { recursive: true });
+		fs.mkdirSync(path.dirname(listPath), { recursive: true });
+		fs.writeFileSync(
+			appPath,
+			"import std.List\nclass App\n  local list: List\nend\n",
+			"utf8",
+		);
+		fs.writeFileSync(listPath, "class List<T>\nend\n", "utf8");
+
+		const appUri = pathToFileUri(appPath);
+		const wsUri = pathToFileUri(tempRoot);
+		const resolvedPath = resolveModulePathToFile("std.List", appUri, [wsUri]);
+		assert(
+			resolvedPath,
+			"Resolver should find std.List under lib/share/lua tree",
+		);
+		assert(
+			resolvedPath
+				.replace(/\\/g, "/")
+				.endsWith("/lib/share/lua/5.4/clua/std/List.clua"),
+			"Resolved path should point to project-local lib tree",
+		);
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
 });
 
 // ============================================================================

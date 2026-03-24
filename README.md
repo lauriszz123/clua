@@ -10,6 +10,14 @@ From this repository:
 luarocks make clua-scm-1.rockspec
 ```
 
+For project-local installs (recommended for editor/LSP resolution in any workspace):
+
+```bash
+luarocks --tree ./lib make clua-scm-1.rockspec
+```
+
+This installs modules under paths such as `lib/share/lua/5.4/...` that the CLua language server resolves automatically.
+
 Then in Lua:
 
 ```lua
@@ -68,5 +76,6 @@ end
 ## Notes
 
 - You must call `require("clua")` before requiring `.clua` modules.
+- Imports like `import std.List` are resolved against installed module trees (global LuaRocks, project `.luarocks`, and common project folders like `lib/` and `vendor/`).
 - This is intentionally minimal and line-based, so class bodies should contain only field declarations and methods.
 - Inheritance is not supported yet.

@@ -25,7 +25,9 @@ build = {
   modules = {
     ["clua"] = "clua/init.lua",
     ["clua.compiler"] = "clua/compiler.lua",
-    ["clua.runtime"] = "clua/runtime.lua"
+    ["clua.runtime"] = "clua/runtime.lua",
+    ["clua.std.List"] = "clua/std/List.clua",
+    ["clua.std.ArrayList"] = "clua/std/ArrayList.clua"
   },
   copy_directories = {
     "clua/std"
