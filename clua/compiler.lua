@@ -53,25 +53,41 @@ local TYPE_NAME_PATTERN = "([%a_][%w_%.%[%]<>%,]*)"
 
 local function split_top_level_commas(text)
 	local parts = {}
-	local depth = 0
+	local angle_depth = 0
+	local paren_depth = 0
+	local bracket_depth = 0
 	local start_idx = 1
 
 	for i = 1, #text do
 		local ch = text:sub(i, i)
 		if ch == "<" then
-			depth = depth + 1
+			angle_depth = angle_depth + 1
 		elseif ch == ">" then
-			depth = depth - 1
-			if depth < 0 then
+			angle_depth = angle_depth - 1
+			if angle_depth < 0 then
 				return nil
 			end
-		elseif ch == "," and depth == 0 then
+		elseif ch == "(" then
+			paren_depth = paren_depth + 1
+		elseif ch == ")" then
+			paren_depth = paren_depth - 1
+			if paren_depth < 0 then
+				return nil
+			end
+		elseif ch == "[" then
+			bracket_depth = bracket_depth + 1
+		elseif ch == "]" then
+			bracket_depth = bracket_depth - 1
+			if bracket_depth < 0 then
+				return nil
+			end
+		elseif ch == "," and angle_depth == 0 and paren_depth == 0 and bracket_depth == 0 then
 			parts[#parts + 1] = trim(text:sub(start_idx, i - 1))
 			start_idx = i + 1
 		end
 	end
 
-	if depth ~= 0 then
+	if angle_depth ~= 0 or paren_depth ~= 0 or bracket_depth ~= 0 then
 		return nil
 	end
 
@@ -102,7 +118,49 @@ end
 
 local validate_type_name
 
+local function validate_function_type(core)
+	local params_blob, return_type = core:match("^function(%b())%s*:%s*(.+)$")
+	if not params_blob then
+		params_blob = core:match("^function(%b())$")
+	end
+
+	if not params_blob then
+		return false, nil
+	end
+
+	local params_inner = params_blob:sub(2, -2)
+	if params_inner ~= "" then
+		local params = split_top_level_commas(params_inner)
+		if not params then
+			return false, nil
+		end
+
+		for _, param_type in ipairs(params) do
+			if param_type == "" then
+				return false, nil
+			end
+			local ok = validate_type_name(param_type)
+			if not ok then
+				return false, nil
+			end
+		end
+	end
+
+	if return_type and trim(return_type) ~= "" then
+		local ok = validate_type_name(return_type)
+		if not ok then
+			return false, nil
+		end
+	end
+
+	return true, "function"
+end
+
 local function validate_type_core(core)
+	if core:match("^function%b()") then
+		return validate_function_type(core)
+	end
+
 	if core:match("^[%a_][%w_%.]*$") then
 		return true, core
 	end
@@ -164,6 +222,10 @@ local function parse_generic_param_map(generic_capture, line_no)
 	end
 
 	local inner = generic_capture:sub(2, -2)
+	if trim(inner) == "" then
+		error(("Invalid generic parameter list at line %d"):format(line_no))
+	end
+
 	local names = split_top_level_commas(inner)
 	if not names then
 		error(("Invalid generic parameter list at line %d"):format(line_no))
@@ -375,32 +437,82 @@ local function parse_field(line, generic_params)
 	return nil
 end
 
-local function compile_method(class_name, lines, start_idx, class_generic_params)
-	local signature = lines[start_idx]
-	local is_private = false
-	-- Accept optional `<T, U>` after the method name and optional `: ReturnType` after the closing paren.
-	local method_name, params_raw = signature:match("^%s*local%s+function%s+([%a_][%w_]*)%s*%((.-)%).*$")
-	local generic_capture = nil
-	if method_name then
-		is_private = true
+local function parse_function_signature(signature)
+	local is_local = false
+	local function_name, generic_capture, params_start =
+		signature:match("^%s*local%s+function%s+([%a_][%w_]*)(%b<>)%s*()%(.*$")
+
+	if function_name then
+		is_local = true
 	else
-		method_name, params_raw = signature:match("^%s*function%s+([%a_][%w_]*)%s*%((.-)%).*$")
+		function_name, generic_capture, params_start =
+			signature:match("^%s*function%s+([%a_][%w_]*)(%b<>)%s*()%(.*$")
 	end
 
-	if not method_name then
-		method_name, generic_capture, params_raw =
-			signature:match("^%s*local%s+function%s+([%a_][%w_]*)(%b<>)%s*%((.-)%).*$")
-		if method_name then
-			is_private = true
+	if not function_name then
+		function_name, params_start = signature:match("^%s*local%s+function%s+([%a_][%w_]*)%s*()%(.*$")
+		if function_name then
+			is_local = true
 		else
-			method_name, generic_capture, params_raw =
-				signature:match("^%s*function%s+([%a_][%w_]*)(%b<>)%s*%((.-)%).*$")
+			function_name, params_start = signature:match("^%s*function%s+([%a_][%w_]*)%s*()%(.*$")
 		end
 	end
 
-	if not method_name then
+	if not function_name or not params_start then
+		return nil
+	end
+
+	local depth = 0
+	local params_end = nil
+	for i = params_start, #signature do
+		local ch = signature:sub(i, i)
+		if ch == "(" then
+			depth = depth + 1
+		elseif ch == ")" then
+			depth = depth - 1
+			if depth == 0 then
+				params_end = i
+				break
+			elseif depth < 0 then
+				return nil
+			end
+		end
+	end
+
+	if not params_end then
+		return nil
+	end
+
+	local params_raw = signature:sub(params_start + 1, params_end - 1)
+	local tail = trim(signature:sub(params_end + 1))
+	local has_return_annotation = false
+	if tail ~= "" then
+		if not tail:match("^:%s*.+$") then
+			return nil
+		end
+		has_return_annotation = true
+	end
+
+	return {
+		is_local = is_local,
+		name = function_name,
+		generic_capture = generic_capture,
+		params_raw = params_raw,
+		has_return_annotation = has_return_annotation,
+	}
+end
+
+local function compile_method(class_name, lines, start_idx, class_generic_params)
+	local signature = lines[start_idx]
+	local parsed_signature = parse_function_signature(signature)
+	if not parsed_signature then
 		error(("Invalid class method declaration at line %d"):format(start_idx))
 	end
+
+	local is_private = parsed_signature.is_local
+	local method_name = parsed_signature.name
+	local generic_capture = parsed_signature.generic_capture
+	local params_raw = parsed_signature.params_raw
 
 	local end_idx = find_block_end(lines, start_idx)
 	local body = {}
@@ -420,6 +532,54 @@ local function compile_method(class_name, lines, start_idx, class_generic_params
 		body = body,
 	},
 		end_idx
+end
+
+local strip_typed_local_annotation
+
+local function compile_standalone_function(lines, start_idx)
+	local signature = lines[start_idx]
+	local parsed_signature = parse_function_signature(signature)
+	if not parsed_signature then
+		return nil
+	end
+
+	local is_local = parsed_signature.is_local
+	local function_name = parsed_signature.name
+	local generic_capture = parsed_signature.generic_capture
+	local method_generic_params = parse_generic_param_map(generic_capture, start_idx)
+	local clean_params, typed_params = parse_params(parsed_signature.params_raw or "", method_generic_params)
+	local end_idx = find_block_end(lines, start_idx)
+	local body = {}
+	for i = start_idx + 1, end_idx - 1 do
+		body[#body + 1] = lines[i]
+	end
+
+	local has_typed_params = #typed_params > 0
+	local has_generics = next(method_generic_params) ~= nil
+	if not has_typed_params and not has_generics and not parsed_signature.has_return_annotation then
+		return nil
+	end
+
+	local out = {}
+	local prefix = is_local and "local function" or "function"
+	out[#out + 1] = ("%s %s(%s)"):format(prefix, function_name, table.concat(clean_params, ", "))
+	for _, info in ipairs(typed_params) do
+		out[#out + 1] = ("  __clua_runtime.assert_type(%s, %q, %q)"):format(
+			info.name,
+			info.type_name,
+			("%s(%s)"):format(function_name, info.name)
+		)
+	end
+	for _, line in ipairs(body) do
+		local rewritten = rewrite_import_statement(line)
+		rewritten = strip_typed_local_annotation(rewritten)
+		rewritten = rewrite_new_expressions(rewritten)
+		out[#out + 1] = rewritten
+	end
+	out[#out + 1] = "end"
+	out[#out + 1] = ""
+
+	return out, end_idx
 end
 
 local function emit_param_asserts(out, class_name, method_name, typed_params)
@@ -575,7 +735,7 @@ local function emit_method_implementation(
 	out[#out + 1] = ""
 end
 
-local function strip_typed_local_annotation(line)
+strip_typed_local_annotation = function(line)
 	local indent, name, type_name, expr = line:match("^(%s*)local%s+([A-Za-z_][A-Za-z0-9_]*)%s*:%s*(.-)%s*=%s*(.-)%s*$")
 	if name and erase_generic_type(type_name) then
 		return ("%slocal %s = %s"):format(indent, name, expr)
@@ -861,6 +1021,7 @@ function M.compile(source, chunk_name)
 	local out = {}
 	local saw_class = false
 	local saw_enum = false
+	local saw_typed_function = false
 	local saw_explicit_return = false
 	local last_decl_name = nil
 	local private_methods_by_class = {}
@@ -886,6 +1047,23 @@ function M.compile(source, chunk_name)
 				out[#out + 1] = enum_line
 			end
 			i = enum_end + 1
+		elseif line:match("^%s*local%s+function%s+") or line:match("^%s*function%s+") then
+			local function_code, function_end = compile_standalone_function(lines, i)
+			if function_code then
+				saw_typed_function = true
+				for _, function_line in ipairs(function_code) do
+					out[#out + 1] = function_line
+				end
+				i = function_end + 1
+			else
+				assert_no_private_method_access(line, i, private_methods_by_class)
+				local stripped = strip_typed_locals(line)
+				if stripped:match("^%s*return%s") or stripped:match("^%s*return%s*$") then
+					saw_explicit_return = true
+				end
+				out[#out + 1] = stripped
+				i = i + 1
+			end
 		else
 			assert_no_private_method_access(line, i, private_methods_by_class)
 			local stripped = strip_typed_locals(line)
@@ -897,7 +1075,7 @@ function M.compile(source, chunk_name)
 		end
 	end
 
-	if saw_class then
+	if saw_class or saw_typed_function then
 		table.insert(out, 1, 'local __clua_runtime = require("clua.runtime")')
 	end
 

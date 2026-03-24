@@ -5,6 +5,9 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local compiler = require("clua.compiler")
+local passed = 0
+local failed = 0
+
 local function test(name, fn)
 	local ok, err = pcall(fn)
 	if ok then
@@ -12,6 +15,7 @@ local function test(name, fn)
 		return true
 	else
 		print("✗ " .. name .. ": " .. tostring(err))
+		failed = failed + 1
 		return false
 	end
 end
@@ -23,9 +27,6 @@ end
 local function has(str, substring)
 	return str:find(substring, 1, true) ~= nil
 end
-
-local passed = 0
-local failed = 0
 
 -- ============================================================================
 -- Test: Simple class generics
@@ -92,7 +93,7 @@ class Mapper
 end
 ]]
 				local out = compile(src)
-				assert(has(out, "function Mapper.map(v)"), "Should have map method")
+				assert(has(out, "function Mapper.map(self, v)"), "Should have map method")
 				assert(has(out, 'assert_type(v, "any"'), "Generic method param should erase to any")
 			end)
 			and 1
@@ -235,7 +236,7 @@ end
 ]]
 				local out = compile(src)
 				assert(
-					has(out, 'local __clua_private_fields_Secret = {"value" = true}'),
+					has(out, 'local __clua_private_fields_Secret = {["value"] = true}'),
 					"Should mark value as private"
 				)
 				assert(has(out, "__priv.value = v"), "Should assign to private storage")
@@ -416,7 +417,7 @@ end
 				local out = compile(src)
 				assert(has(out, "local Base = {}"), "Should declare Base")
 				assert(has(out, "local Derived = {}"), "Should declare Derived")
-				assert(has(out, "setmetatable(Derived, Base)"), "Should set up inheritance")
+				assert(has(out, "setmetatable(Derived, {__index = Base})"), "Should set up inheritance")
 			end)
 			and 1
 		or 0

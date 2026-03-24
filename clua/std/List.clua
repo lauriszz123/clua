@@ -1,0 +1,35 @@
+class List<T>
+	local items: table<string, T>
+
+	function new()
+		self.items = {}
+	end
+
+	function add(key: string, item: T)
+		self.items[key] = item
+	end
+
+	function get(key: string): T
+		return self.items[key]
+	end
+
+	function remove(key: string)
+		self.items[key] = nil
+	end
+
+	function list(): function(): T
+		local keys = {}
+
+		for k in pairs(self.items) do
+			table.insert(keys, k)
+		end
+
+		local i = 0
+		return function()
+			i = i + 1
+			if i <= #keys then
+				return self.items[keys[i]]
+			end
+		end
+	end
+end

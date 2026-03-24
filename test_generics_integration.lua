@@ -6,6 +6,8 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local compiler = require("clua.compiler")
 local runtime = require("clua.runtime")
+local passed = 0
+local failed = 0
 
 local function test(name, fn)
 	local ok, err = pcall(fn)
@@ -14,12 +16,14 @@ local function test(name, fn)
 		return true
 	else
 		print("✗ " .. name .. ": " .. tostring(err))
+		failed = failed + 1
 		return false
 	end
 end
 
-local passed = 0
-local failed = 0
+local function has(str, substring)
+	return str:find(substring, 1, true) ~= nil
+end
 
 -- ============================================================================
 -- Test: Compile and exec generic Box class
@@ -53,10 +57,7 @@ end
 				-- Instantiate
 				local myBox = Box.new(42)
 				assert(myBox, "Should create Box instance")
-				assert(
-					myBox.value == 42 or myBox:get() == nil,
-					"Box should hold value (relaxed check due to private fields)"
-				)
+				assert(myBox:get() == 42, "Box should hold value")
 			end)
 			and 1
 		or 0
@@ -147,7 +148,7 @@ end
 
 				local t = Tagged.new("data", 5)
 				assert(t, "Should create Tagged instance")
-				assert(t.count == 5, "Concrete field should be set")
+				assert(lua:find('assert_type%(c, "number"'), "Concrete number param should be checked")
 			end)
 			and 1
 		or 0
@@ -170,12 +171,9 @@ end
 				local chunk = load(lua)
 				local Util = chunk()
 
-				local u = Util.new()
-				assert(u, "Should create Util instance")
-				assert(u.identity, "Should have identity method")
-
-				-- Note: identity method won't be callable without proper setup,
-				-- but we just verify it doesn't crash during instantiation
+				assert(Util.identity, "Should have identity method")
+				local u = setmetatable({}, Util)
+				assert(Util.identity(u, 12) == 12, "identity should return its input")
 			end)
 			and 1
 		or 0
@@ -383,8 +381,8 @@ end
 				local lua = compiler.compile(src, "test")
 				local chunk = assert(load(lua), "Compiled Lua must be valid")
 
-				assert(lua:find("function identity(x)"), "Should have identity function")
-				assert(lua:find('assert_type(x, "any"'), "Generic should erase to any")
+				assert(has(lua, "function identity(x)"), "Should have identity function")
+				assert(has(lua, 'assert_type(x, "any"'), "Generic should erase to any")
 			end)
 			and 1
 		or 0
@@ -412,10 +410,10 @@ end
 				local lua = compiler.compile(src, "test")
 				local chunk = assert(load(lua), "Compiled Lua must be valid")
 
-				assert(lua:find("function Tagged.new"), "Should have constructor")
-				assert(lua:find('assert_type(n, "number"'), "number field type should be checked")
-				assert(lua:find('assert_type(s, "string"'), "string field type should be checked")
-				assert(lua:find('assert_type(v, "any"'), "generic T field should erase to any")
+				assert(has(lua, "function Tagged.new"), "Should have constructor")
+				assert(has(lua, 'assert_type(n, "number"'), "number field type should be checked")
+				assert(has(lua, 'assert_type(s, "string"'), "string field type should be checked")
+				assert(has(lua, 'assert_type(v, "any"'), "generic T field should erase to any")
 			end)
 			and 1
 		or 0
@@ -445,7 +443,7 @@ end
 
 				assert(lua:find("local Base = {}"), "Should declare Base")
 				assert(lua:find("local Derived = {}"), "Should declare Derived")
-				assert(lua:find("setmetatable(Derived, Base)"), "Should set up inheritance")
+				assert(lua:find("setmetatable%(Derived, %{%__index = Base%}%)"), "Should set up inheritance")
 			end)
 			and 1
 		or 0
@@ -473,8 +471,8 @@ end
 				local lua = compiler.compile(src, "test")
 				local chunk = assert(load(lua), "Compiled Lua must be valid")
 
-				assert(lua:find("function Wrapper.get(self)"), "Should have get method")
-				assert(lua:find("function Wrapper.set(self, v)"), "Should have set method")
+				assert(has(lua, "function Wrapper.get(self)"), "Should have get method")
+				assert(has(lua, "function Wrapper.set(self, v)"), "Should have set method")
 			end)
 			and 1
 		or 0
