@@ -6,6 +6,7 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local compiler = require("clua.compiler")
 local runtime = require("clua.runtime")
+local clua = require("clua")
 local passed = 0
 local failed = 0
 
@@ -24,6 +25,52 @@ end
 local function has(str, substring)
 	return str:find(substring, 1, true) ~= nil
 end
+
+local function with_temp_dir(fn)
+	local base = os.tmpname()
+	os.remove(base)
+	assert(os.execute('mkdir -p "' .. base .. '"') == true or os.execute('mkdir -p "' .. base .. '"') == 0)
+	local ok, err = pcall(fn, base)
+	os.execute('rm -rf "' .. base .. '"')
+	if not ok then
+		error(err)
+	end
+end
+
+-- ============================================================================
+-- Test: Compile and exec generic Box class
+-- ============================================================================
+passed = passed
+	+ (
+		test("Runtime import std.List resolves through clua.std alias", function()
+				with_temp_dir(function(temp_dir)
+					local app_path = temp_dir .. "/app.clua"
+					local file = assert(io.open(app_path, "w"))
+					file:write([[import std.List
+
+class App
+	local list: List<number>
+
+	function new()
+		self.list = new List<number>()
+	end
+end
+]])
+					file:close()
+
+					local old_path = package.path
+					package.path = temp_dir .. "/?.lua;" .. temp_dir .. "/?/init.lua;" .. old_path
+					local chunk = assert(clua.loadfile(app_path))
+					local App = chunk()
+					assert(App and App.new, "Should load App class from .clua file with std import")
+					local app = App.new()
+					assert(app, "Should instantiate App")
+					package.path = old_path
+				end)
+			end)
+			and 1
+		or 0
+	)
 
 -- ============================================================================
 -- Test: Compile and exec generic Box class

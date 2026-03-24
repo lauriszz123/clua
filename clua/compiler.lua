@@ -6,6 +6,13 @@ end
 
 local erase_generic_type
 
+local function normalize_import_module_path(module_path)
+	if type(module_path) == "string" and module_path:match("^std%.") then
+		return "clua." .. module_path
+	end
+	return module_path
+end
+
 local function rewrite_new_expressions(line)
 	return (
 		line:gsub("new%s+([%a_][%w_%.<>%,%[%]%s]*)%s*%(", function(type_name)
@@ -32,7 +39,8 @@ local function rewrite_import_statement(line)
 	end
 
 	local alias = module_path:match("([%a_][%w_]*)$") or module_path
-	local rewritten = ("%slocal %s = require(%q)"):format(indent, alias, module_path)
+	local resolved_module_path = normalize_import_module_path(module_path)
+	local rewritten = ("%slocal %s = require(%q)"):format(indent, alias, resolved_module_path)
 	if comment and comment ~= "" then
 		rewritten = rewritten .. " " .. comment
 	end

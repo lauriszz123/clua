@@ -338,6 +338,56 @@ function resolveImportClassTarget(importContext, activeUri) {
 	};
 }
 
+function extractImportModulePaths(model) {
+	if (!model || !model.lines) {
+		return [];
+	}
+
+	const modules = [];
+	const seen = new Set();
+	for (const line of model.lines) {
+		const importMatch = line.match(
+			/^\s*import\s+([A-Za-z_][A-Za-z0-9_\.]*)\s*(?:--.*)?$/,
+		);
+		if (!importMatch) {
+			continue;
+		}
+		const modulePath = importMatch[1];
+		if (!seen.has(modulePath)) {
+			seen.add(modulePath);
+			modules.push(modulePath);
+		}
+	}
+
+	return modules;
+}
+
+function buildWorkspaceIndexWithImports(documentUri, model) {
+	const workspaceIndex = buildWorkspaceIndex(
+		documentUri,
+		model,
+		documents,
+		workspaceFolders,
+		model.imports,
+	);
+
+	for (const modulePath of extractImportModulePaths(model)) {
+		const resolvedImport = resolveImportTarget(modulePath, documentUri);
+		if (!resolvedImport || !resolvedImport.targetModel) {
+			continue;
+		}
+
+		for (const classInfo of resolvedImport.targetModel.classes.values()) {
+			workspaceIndex.set(classInfo.name, {
+				uri: resolvedImport.targetUri,
+				classInfo,
+			});
+		}
+	}
+
+	return workspaceIndex;
+}
+
 function getCompletionTargetClass(
 	beforeCursor,
 	model,
@@ -648,13 +698,7 @@ connection.onCompletion((params) => {
 	}
 
 	const model = buildModel(document.getText());
-	const workspaceIndex = buildWorkspaceIndex(
-		document.uri,
-		model,
-		documents,
-		workspaceFolders,
-		model.imports,
-	);
+	const workspaceIndex = buildWorkspaceIndexWithImports(document.uri, model);
 	const lineText = model.lines[params.position.line] || "";
 	const beforeCursor = lineText.slice(0, params.position.character);
 	const classInfo = getClassAtLine(model, params.position.line);
@@ -986,13 +1030,7 @@ connection.onHover((params) => {
 	}
 
 	const model = buildModel(document.getText());
-	const workspaceIndex = buildWorkspaceIndex(
-		document.uri,
-		model,
-		documents,
-		workspaceFolders,
-		model.imports,
-	);
+	const workspaceIndex = buildWorkspaceIndexWithImports(document.uri, model);
 	const lineText = model.lines[params.position.line] || "";
 	const token = getWordAt(lineText, params.position.character);
 	if (!token) {
@@ -1235,13 +1273,7 @@ connection.onDefinition((params) => {
 	}
 
 	const model = buildModel(document.getText());
-	const workspaceIndex = buildWorkspaceIndex(
-		document.uri,
-		model,
-		documents,
-		workspaceFolders,
-		model.imports,
-	);
+	const workspaceIndex = buildWorkspaceIndexWithImports(document.uri, model);
 	const lineText = model.lines[params.position.line] || "";
 	const token = getWordAt(lineText, params.position.character);
 	if (!token) {
@@ -1467,13 +1499,7 @@ connection.onSignatureHelp((params) => {
 	}
 
 	const model = buildModel(document.getText());
-	const workspaceIndex = buildWorkspaceIndex(
-		document.uri,
-		model,
-		documents,
-		workspaceFolders,
-		model.imports,
-	);
+	const workspaceIndex = buildWorkspaceIndexWithImports(document.uri, model);
 	const lineText = model.lines[params.position.line] || "";
 	const beforeCursor = lineText.slice(0, params.position.character);
 	const classInfo = getClassAtLine(model, params.position.line);
@@ -1619,13 +1645,7 @@ connection.onWorkspaceSymbol((params) => {
 
 function sendDiagnostics(document) {
 	const model = buildModel(document.getText());
-	const workspaceIndex = buildWorkspaceIndex(
-		document.uri,
-		model,
-		documents,
-		workspaceFolders,
-		model.imports,
-	);
+	const workspaceIndex = buildWorkspaceIndexWithImports(document.uri, model);
 	const diagnostics = validateTextDocument(document, workspaceIndex, {
 		resolveImport: (modulePath) =>
 			resolveImportTarget(modulePath, document.uri),

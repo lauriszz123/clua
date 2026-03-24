@@ -58,22 +58,35 @@ local function default_clua_path()
 	return table.concat(patterns, ";")
 end
 
+local function import_aliases_for(module_name)
+	if type(module_name) == "string" and module_name:match("^std%.") then
+		return { module_name, "clua." .. module_name }
+	end
+	return { module_name }
+end
+
 function M.make_searcher(opts)
 	opts = opts or {}
 	local clua_path = opts.path or default_clua_path()
 
 	return function(module_name)
-		local module_file, search_err = package.searchpath(module_name, clua_path)
-		if not module_file then
-			return search_err
+		local errors = {}
+		for _, candidate_name in ipairs(import_aliases_for(module_name)) do
+			local module_file, search_err = package.searchpath(candidate_name, clua_path)
+			if module_file then
+				local chunk, load_err = M.loadfile(module_file)
+				if not chunk then
+					return load_err
+				end
+
+				return chunk, module_file
+			end
+			if search_err and search_err ~= "" then
+				errors[#errors + 1] = search_err
+			end
 		end
 
-		local chunk, load_err = M.loadfile(module_file)
-		if not chunk then
-			return load_err
-		end
-
-		return chunk, module_file
+		return table.concat(errors)
 	end
 end
 

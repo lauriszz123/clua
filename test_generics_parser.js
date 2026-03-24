@@ -580,6 +580,59 @@ end
 });
 
 // ============================================================================
+// Test: Diagnostics catch wrong arity for class method call on generic field
+// ============================================================================
+test("Diagnostics catch wrong method argument count on generic field", function () {
+	const src = `
+class List<T>
+  function add(key: string, item: T)
+  end
+end
+
+class Main
+  list: List<number>
+  function run()
+    self.list.add(1)
+  end
+end
+`;
+	const doc = { getText: () => src };
+	const diags = validateTextDocument(doc, new Map());
+	has(
+		diags,
+		(d) => d.message.includes("expects 2 arguments, got 1"),
+		"Should report wrong method argument count",
+	);
+});
+
+// ============================================================================
+// Test: Diagnostics catch wrong argument type for class method call
+// ============================================================================
+test("Diagnostics catch wrong method argument type on generic field", function () {
+	const src = `
+class List<T>
+  function add(key: string, item: T)
+  end
+end
+
+class Main
+  list: List<number>
+  function run()
+    self.list.add(1, 2)
+  end
+end
+`;
+	const doc = { getText: () => src };
+	const diags = validateTextDocument(doc, new Map());
+	has(
+		diags,
+		(d) =>
+			d.message.includes("Argument 1") && d.message.includes("expects string"),
+		"Should report wrong type for first method argument",
+	);
+});
+
+// ============================================================================
 // Test: Generic in nested scope
 // ============================================================================
 test("Generic type in nested class context", function () {
@@ -746,10 +799,10 @@ test("External workspace reports unresolved import diagnostic", function () {
 		const appPath = path.join(tempRoot, "src", "app.clua");
 		fs.mkdirSync(path.dirname(appPath), { recursive: true });
 		const src = [
-			"import std.List",
+			"import std.DoesNotExist",
 			"",
 			"class App",
-			"  local list: List",
+			"  local list: DoesNotExist",
 			"end",
 		].join("\n");
 		fs.writeFileSync(appPath, src, "utf8");
@@ -776,7 +829,7 @@ test("External workspace reports unresolved import diagnostic", function () {
 
 		has(
 			diags,
-			(d) => d.message.includes("Cannot resolve import std.List"),
+			(d) => d.message.includes("Cannot resolve import std.DoesNotExist"),
 			"Should flag unresolved import in external workspace",
 		);
 	} finally {
@@ -853,6 +906,7 @@ test("External workspace resolves std.List from local .luarocks", function () {
 test("External workspace resolves std.List from lib/share/lua", function () {
 	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clua-lsp-ext-"));
 	try {
+		const moduleName = "ProjectList";
 		const appPath = path.join(tempRoot, "src", "app.clua");
 		const listPath = path.join(
 			tempRoot,
@@ -862,30 +916,84 @@ test("External workspace resolves std.List from lib/share/lua", function () {
 			"5.4",
 			"clua",
 			"std",
-			"List.clua",
+			`${moduleName}.clua`,
 		);
 
 		fs.mkdirSync(path.dirname(appPath), { recursive: true });
 		fs.mkdirSync(path.dirname(listPath), { recursive: true });
 		fs.writeFileSync(
 			appPath,
-			"import std.List\nclass App\n  local list: List\nend\n",
+			`import std.${moduleName}\nclass App\n  local list: ${moduleName}\nend\n`,
 			"utf8",
 		);
-		fs.writeFileSync(listPath, "class List<T>\nend\n", "utf8");
+		fs.writeFileSync(listPath, `class ${moduleName}<T>\nend\n`, "utf8");
 
 		const appUri = pathToFileUri(appPath);
 		const wsUri = pathToFileUri(tempRoot);
-		const resolvedPath = resolveModulePathToFile("std.List", appUri, [wsUri]);
+		const resolvedPath = resolveModulePathToFile(`std.${moduleName}`, appUri, [
+			wsUri,
+		]);
 		assert(
 			resolvedPath,
-			"Resolver should find std.List under lib/share/lua tree",
+			"Resolver should find std.ProjectList under lib/share/lua tree",
 		);
 		assert(
 			resolvedPath
 				.replace(/\\/g, "/")
-				.endsWith("/lib/share/lua/5.4/clua/std/List.clua"),
+				.endsWith(`/lib/share/lua/5.4/clua/std/${moduleName}.clua`),
 			"Resolved path should point to project-local lib tree",
+		);
+	} finally {
+		fs.rmSync(tempRoot, { recursive: true, force: true });
+	}
+});
+
+// ============================================================================
+// Test: External workspace resolves std.List from LuaRocks rocks tree layout
+// ============================================================================
+test("External workspace resolves std.List from .luarocks rocks tree", function () {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clua-lsp-ext-"));
+	try {
+		const moduleName = "RocksTreeList";
+		const appPath = path.join(tempRoot, "src", "app.clua");
+		const listPath = path.join(
+			tempRoot,
+			".luarocks",
+			"lib",
+			"luarocks",
+			"rocks-5.4",
+			"clua",
+			"scm-1",
+			"clua",
+			"std",
+			`${moduleName}.clua`,
+		);
+
+		fs.mkdirSync(path.dirname(appPath), { recursive: true });
+		fs.mkdirSync(path.dirname(listPath), { recursive: true });
+		fs.writeFileSync(
+			appPath,
+			`import std.${moduleName}\nclass App\n  local list: ${moduleName}\nend\n`,
+			"utf8",
+		);
+		fs.writeFileSync(listPath, `class ${moduleName}<T>\nend\n`, "utf8");
+
+		const appUri = pathToFileUri(appPath);
+		const wsUri = pathToFileUri(tempRoot);
+		const resolvedPath = resolveModulePathToFile(`std.${moduleName}`, appUri, [
+			wsUri,
+		]);
+		assert(
+			resolvedPath,
+			"Resolver should find std.RocksTreeList under .luarocks rocks tree",
+		);
+		assert(
+			resolvedPath
+				.replace(/\\/g, "/")
+				.endsWith(
+					`/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std/${moduleName}.clua`,
+				),
+			"Resolved path should point to LuaRocks rocks tree",
 		);
 	} finally {
 		fs.rmSync(tempRoot, { recursive: true, force: true });

@@ -33,6 +33,24 @@ end
 -- ============================================================================
 passed = passed
 	+ (
+		test("Rewrite std import to clua.std require", function()
+				local src = [[
+import std.List
+class App
+end
+]]
+				local out = compile(src)
+				assert(has(out, 'local List = require("clua.std.List")'), "std.List import should rewrite to clua.std.List require")
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+-- Test: Simple class generics
+-- ============================================================================
+passed = passed
+	+ (
 		test("Simple class generics (Box<T>)", function()
 				local src = [[
 class Box<T>

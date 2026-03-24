@@ -110,6 +110,87 @@ function isArrayType(typeName) {
 	return typeof typeName === "string" && typeName.endsWith("[]");
 }
 
+function splitTopLevelCommas(text) {
+	const out = [];
+	let angleDepth = 0;
+	let parenDepth = 0;
+	let bracketDepth = 0;
+	let start = 0;
+
+	for (let i = 0; i < text.length; i += 1) {
+		const ch = text[i];
+		if (ch === "<") {
+			angleDepth += 1;
+		} else if (ch === ">") {
+			angleDepth -= 1;
+		} else if (ch === "(") {
+			parenDepth += 1;
+		} else if (ch === ")") {
+			parenDepth -= 1;
+		} else if (ch === "[") {
+			bracketDepth += 1;
+		} else if (ch === "]") {
+			bracketDepth -= 1;
+		} else if (
+			ch === "," &&
+			angleDepth === 0 &&
+			parenDepth === 0 &&
+			bracketDepth === 0
+		) {
+			out.push(text.slice(start, i).trim());
+			start = i + 1;
+		}
+	}
+
+	const tail = text.slice(start).trim();
+	if (tail) {
+		out.push(tail);
+	}
+
+	return out;
+}
+
+function buildTypeParamMapFromTypeRef(typeRef, targetClass) {
+	if (
+		!typeRef ||
+		!targetClass ||
+		!targetClass.typeParams ||
+		!targetClass.typeParams.length
+	) {
+		return null;
+	}
+
+	const normalized = String(typeRef).replace(/\s+/g, "");
+	const genericMatch = normalized.match(/^[A-Za-z_][A-Za-z0-9_\.]*<(.+)>$/);
+	if (!genericMatch) {
+		return null;
+	}
+
+	const args = splitTopLevelCommas(genericMatch[1]);
+	if (!args.length) {
+		return null;
+	}
+
+	const map = new Map();
+	for (let i = 0; i < targetClass.typeParams.length; i += 1) {
+		map.set(targetClass.typeParams[i], args[i] || "any");
+	}
+	return map;
+}
+
+function applyTypeParamMap(typeName, typeParamMap) {
+	if (!typeName || !typeParamMap || typeParamMap.size === 0) {
+		return typeName;
+	}
+
+	let out = String(typeName);
+	for (const [param, concrete] of typeParamMap.entries()) {
+		const re = new RegExp(`\\b${param}\\b`, "g");
+		out = out.replace(re, concrete);
+	}
+	return out;
+}
+
 // Returns an array of Diagnostic objects; does NOT call connection.sendDiagnostics itself.
 function validateTextDocument(document, workspaceIndex, options = {}) {
 	const text = document.getText();
@@ -405,6 +486,86 @@ function validateTextDocument(document, workspaceIndex, options = {}) {
 							startPos + `self.${fieldName}.${memberName}`.length,
 							`Type ${fieldInfo.typeName} has no member '${memberName}'`,
 						);
+					}
+
+					// Validate method call arity and argument types on class-typed fields.
+					const methodCallRe =
+						/\bself\.([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)/g;
+					let methodCallMatch;
+					while ((methodCallMatch = methodCallRe.exec(analysisLine)) !== null) {
+						const fieldName = methodCallMatch[1];
+						const methodName = methodCallMatch[2];
+						const argsText = (methodCallMatch[3] || "").trim();
+						const fieldInfo = classInfo.fields.get(fieldName);
+						if (!fieldInfo || isArrayType(fieldInfo.typeName)) {
+							continue;
+						}
+
+						const resolved = resolveClassByType(
+							fieldInfo.typeName,
+							model,
+							workspaceIndex,
+						);
+						if (!resolved || !resolved.classInfo) {
+							continue;
+						}
+
+						const targetClass = resolved.classInfo;
+						if (!targetClass.methods || !targetClass.methods.has(methodName)) {
+							continue;
+						}
+
+						const methodInfoForCall = targetClass.methods.get(methodName);
+						const expectedParams = methodInfoForCall.params || [];
+						const args = argsText ? splitTopLevelCommas(argsText) : [];
+
+						if (args.length !== expectedParams.length) {
+							const rawIdx = bodyLine.indexOf(
+								`self.${fieldName}.${methodName}`,
+							);
+							const startPos = rawIdx >= 0 ? rawIdx : methodCallMatch.index;
+							pushDiag(
+								diagnostics,
+								k,
+								startPos,
+								startPos + `self.${fieldName}.${methodName}`.length,
+								`Method ${fieldInfo.typeName}.${methodName} expects ${expectedParams.length} arguments, got ${args.length}`,
+							);
+							continue;
+						}
+
+						const typeParamMap = buildTypeParamMapFromTypeRef(
+							fieldInfo.typeName,
+							targetClass,
+						);
+
+						for (let argIndex = 0; argIndex < args.length; argIndex += 1) {
+							const argExpr = args[argIndex];
+							const paramInfo = expectedParams[argIndex];
+							const expectedType = applyTypeParamMap(
+								paramInfo.typeName,
+								typeParamMap,
+							);
+							const inferredType =
+								inferExpressionType(
+									argExpr,
+									model,
+									classInfo,
+									methodInfo,
+									workspaceIndex,
+								) || inferLiteralType(argExpr);
+
+							if (!expressionMatchesDeclaredType(inferredType, expectedType)) {
+								const argStart = bodyLine.indexOf(argExpr);
+								pushDiag(
+									diagnostics,
+									k,
+									Math.max(argStart, 0),
+									Math.max(argStart, 0) + argExpr.length,
+									`Argument ${argIndex + 1} of ${fieldInfo.typeName}.${methodName} expects ${expectedType}, got ${inferredType || "unknown"}`,
+								);
+							}
+						}
 					}
 
 					// Type mismatch check for assignments to declared fields.

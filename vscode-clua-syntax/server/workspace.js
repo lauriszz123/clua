@@ -358,6 +358,44 @@ function resolveModulePathToFile(
 
 	const roots = getModuleSearchRoots(activeUri, workspaceFolders);
 	const variants = buildModuleVariants(modulePath);
+	const candidatePaths = [];
+	for (const variant of variants) {
+		for (const candidate of moduleVariantCandidates(variant)) {
+			candidatePaths.push(candidate);
+		}
+	}
+
+	const rocksRoots = [];
+	const home = process.env.HOME || process.env.USERPROFILE || "";
+	if (home) {
+		for (const version of ["5.1", "5.2", "5.3", "5.4", "5.5"]) {
+			rocksRoots.push(
+				path.join(home, ".luarocks", "lib", "luarocks", `rocks-${version}`),
+			);
+		}
+	}
+
+	for (const folderUri of workspaceFolders || []) {
+		const folderPath = fileUriToPath(folderUri);
+		if (!folderPath) {
+			continue;
+		}
+		for (const version of ["5.1", "5.2", "5.3", "5.4", "5.5"]) {
+			rocksRoots.push(
+				path.join(
+					folderPath,
+					".luarocks",
+					"lib",
+					"luarocks",
+					`rocks-${version}`,
+				),
+			);
+			rocksRoots.push(
+				path.join(folderPath, "lib", "lib", "luarocks", `rocks-${version}`),
+			);
+		}
+	}
+
 	if (emit) {
 		emit({
 			event: "start",
@@ -367,6 +405,51 @@ function resolveModulePathToFile(
 			roots,
 			variants,
 		});
+	}
+
+	for (const rocksRoot of rocksRoots) {
+		let packageEntries = [];
+		try {
+			packageEntries = fs.readdirSync(rocksRoot, { withFileTypes: true });
+		} catch (_err) {
+			continue;
+		}
+
+		for (const pkgEntry of packageEntries) {
+			if (!pkgEntry.isDirectory()) {
+				continue;
+			}
+			const pkgRoot = path.join(rocksRoot, pkgEntry.name);
+			let versionEntries = [];
+			try {
+				versionEntries = fs.readdirSync(pkgRoot, { withFileTypes: true });
+			} catch (_err) {
+				continue;
+			}
+
+			for (const verEntry of versionEntries) {
+				if (!verEntry.isDirectory()) {
+					continue;
+				}
+				const verRoot = path.join(pkgRoot, verEntry.name);
+				for (const candidate of candidatePaths) {
+					const full = path.join(verRoot, candidate);
+					if (fs.existsSync(full)) {
+						if (emit) {
+							emit({
+								event: "hit",
+								modulePath,
+								path: full,
+								variant: "rocks-tree",
+								candidate,
+								root: rocksRoot,
+							});
+						}
+						return full;
+					}
+				}
+			}
+		}
 	}
 
 	for (const root of roots) {
