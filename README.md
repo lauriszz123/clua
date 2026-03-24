@@ -2,6 +2,34 @@
 
 Minimal typed class transpiler for Lua with on-the-fly `.clua` loading.
 
+## Install (LuaRocks)
+
+From this repository:
+
+```bash
+luarocks make clua-scm-1.rockspec
+```
+
+Then in Lua:
+
+```lua
+require("clua")
+```
+
+Create a source rock locally:
+
+```bash
+luarocks pack clua-scm-1.rockspec
+```
+
+## Publish Notes
+
+- The rockspec file is `clua-scm-1.rockspec`.
+- Before publishing to LuaRocks, update `source.url` and `description.homepage`
+  in the rockspec if your canonical repository URL differs.
+- For a stable release, add a versioned rockspec such as `clua-0.1.0-1.rockspec`
+  pointing at a tagged release archive.
+
 ## What it supports
 
 - `class Name`
