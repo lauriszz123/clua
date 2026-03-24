@@ -103,6 +103,41 @@ local function dir_exists(path)
 	return ok ~= nil
 end
 
+-- Search for a .clua file in the roots derived from package.path.
+-- Handles two placement styles:
+--   1. <root>/clua/std/ArrayList.clua       (ideal; standard searchpath)
+--   2. <root>/clua/std/ArrayList/ArrayList.clua  (LuaRocks install.lua nested style)
+-- Uses only io.open so it works in sandboxed environments (e.g. LÖVE 12+).
+local function search_in_package_path_roots(module_name)
+	local sep = package.config:sub(1, 1)
+	local module_rel = module_name:gsub("%.", sep == "\\" and "\\" or "/")
+	local last_part = module_name:match("[^%.]+$") or module_name
+
+	local lua_path = package.path or ""
+	local seen = {}
+
+	for entry in lua_path:gmatch("[^;]+") do
+		local prefix = entry:match("^(.-)%?")
+		if prefix and prefix ~= "" then
+			local clean_prefix = prefix:gsub("[/\\]+$", "")
+			if clean_prefix ~= "" and clean_prefix ~= "." and not seen[clean_prefix] then
+				seen[clean_prefix] = true
+				-- Style 1: flat  (in case a future install puts it there)
+				local c1 = clean_prefix .. sep .. module_rel .. ".clua"
+				if file_exists(c1) then
+					return c1
+				end
+				-- Style 2: nested (LuaRocks install.lua placement)
+				local c2 = clean_prefix .. sep .. module_rel .. sep .. last_part .. ".clua"
+				if file_exists(c2) then
+					return c2
+				end
+			end
+		end
+	end
+	return nil
+end
+
 local function default_rock_roots()
 	local version = lua_version_suffix()
 	local is_windows = package.config:sub(1, 1) == "\\"
@@ -194,6 +229,9 @@ function M.make_searcher(opts)
 			local module_file, search_err = package.searchpath(candidate_name, clua_path)
 			if not module_file then
 				module_file = search_rocks_tree(candidate_name, rock_roots)
+			end
+			if not module_file then
+				module_file = search_in_package_path_roots(candidate_name)
 			end
 			if module_file then
 				local chunk, load_err = M.loadfile(module_file)

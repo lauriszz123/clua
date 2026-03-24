@@ -1,0 +1,77 @@
+class Result<T, E>
+	local ok: boolean
+	local value: any
+	local err: any
+
+	function new(value: T)
+		self.ok = true
+		self.value = value
+		self.err = nil
+	end
+
+	function new(error_value: E, is_error: boolean)
+		if not is_error then
+			error("Result.new(error, is_error): is_error must be true", 2)
+		end
+
+		self.ok = false
+		self.value = nil
+		self.err = error_value
+	end
+
+	function isOk(): boolean
+		return self.ok
+	end
+
+	function isErr(): boolean
+		return not self.ok
+	end
+
+	function unwrap(): T
+		if not self.ok then
+			error("Result.unwrap called on err", 2)
+		end
+
+		return self.value
+	end
+
+	function unwrapErr(): E
+		if self.ok then
+			error("Result.unwrapErr called on ok", 2)
+		end
+
+		return self.err
+	end
+
+	function unwrapOr(default_value: T): T
+		if self.ok then
+			return self.value
+		end
+
+		return default_value
+	end
+
+	function map<U>(mapper: function(value: T): U): Result<U, E>
+		if not self.ok then
+			return new Result<U, E>(self.err, true)
+		end
+
+		return new Result<U, E>(mapper(self.value))
+	end
+
+	function mapErr<F>(mapper: function(error_value: E): F): Result<T, F>
+		if self.ok then
+			return new Result<T, F>(self.value)
+		end
+
+		return new Result<T, F>(mapper(self.err), true)
+	end
+
+	function andThen<U>(next_fn: function(value: T): Result<U, E>): Result<U, E>
+		if not self.ok then
+			return new Result<U, E>(self.err, true)
+		end
+
+		return next_fn(self.value)
+	end
+end

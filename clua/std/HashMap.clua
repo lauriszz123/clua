@@ -1,0 +1,84 @@
+class HashMap<K, V>
+	local items: table<any, V>
+	local count: number
+
+	function new()
+		self.items = {}
+		self.count = 0
+	end
+
+	function ensureHashableKey(key: K)
+		local key_type = type(key)
+		if key_type ~= "string" and key_type ~= "number" and key_type ~= "boolean" then
+			error("HashMap key must be string, number, or boolean", 2)
+		end
+	end
+
+	function set(key: K, value: V)
+		self.ensureHashableKey(key)
+		if self.items[key] == nil then
+			self.count = self.count + 1
+		end
+		self.items[key] = value
+	end
+
+	function get(key: K): V
+		self.ensureHashableKey(key)
+		return self.items[key]
+	end
+
+	function has(key: K): boolean
+		self.ensureHashableKey(key)
+		return self.items[key] ~= nil
+	end
+
+	function remove(key: K)
+		self.ensureHashableKey(key)
+		if self.items[key] ~= nil then
+			self.items[key] = nil
+			self.count = self.count - 1
+		end
+	end
+
+	function size(): number
+		return self.count
+	end
+
+	function clear()
+		self.items = {}
+		self.count = 0
+	end
+
+	function keys(): K[]
+		local out: K[]
+		out = {}
+		for key, _ in pairs(self.items) do
+			table.insert(out, key)
+		end
+		return out
+	end
+
+	function values(): V[]
+		local out: V[]
+		out = {}
+		for _, value in pairs(self.items) do
+			table.insert(out, value)
+		end
+		return out
+	end
+
+	function entries(): table<string, any>[]
+		local out: table<string, any>[]
+		out = {}
+		for key, value in pairs(self.items) do
+			table.insert(out, { key = key, value = value })
+		end
+		return out
+	end
+
+	function forEach(callback: function(key: K, value: V))
+		for key, value in pairs(self.items) do
+			callback(key, value)
+		end
+	end
+end

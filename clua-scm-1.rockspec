@@ -24,12 +24,21 @@ build = {
   type = "builtin",
   modules = {
     ["clua"] = "clua/init.lua",
+    ["clua.love"] = "clua/love.lua",
     ["clua.compiler"] = "clua/compiler/init.lua",
     ["clua.compiler.util"] = "clua/compiler/util.lua",
     ["clua.compiler.typesys"] = "clua/compiler/typesys.lua",
     ["clua.compiler.parser"] = "clua/compiler/parser.lua",
     ["clua.compiler.semantic"] = "clua/compiler/semantic.lua",
     ["clua.runtime"] = "clua/runtime.lua"
+  },
+  install = {
+    lua = {
+      ["clua/std/HashMap.clua"] = "clua/std/HashMap.clua",
+      ["clua/std/List.clua"] = "clua/std/List.clua",
+      ["clua/std/Option.clua"] = "clua/std/Option.clua",
+      ["clua/std/Result.clua"] = "clua/std/Result.clua",
+    }
   },
   copy_directories = {
     "clua/std"

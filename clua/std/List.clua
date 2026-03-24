@@ -1,48 +1,37 @@
 class List<T>
-	local items: table<string, T>
+	local items: T[]
 
 	function new()
 		self.items = {}
 	end
 
-	function add(key: string, item: T)
-		self.items[key] = item
+	function add(item: T)
+		table.insert(self.items, item)
 	end
 
-	function has(key: string): boolean
-		return self.items[key] ~= nil
+	function add(index: number, item: T)
+		table.insert(self.items, index, item)
 	end
 
-	function get(key: string): T
-		return self.items[key]
+	function remove(index: number)
+		table.remove(self.items, index)
 	end
 
-	function remove(key: string)
-		self.items[key] = nil
+	function get(index: number): T
+		return self.items[index]
 	end
 
-	function clear()
-		self.items = {}
-	end
-
-	function forEach(callback: function(item: T))
-		for _, item in pairs(self.items) do
-			callback(item)
-		end
+	function size(): number
+		return #self.items
 	end
 
 	function iter(): function(): T
-		local keys = {}
 		local i = 0
-
-		for k in pairs(self.items) do
-			table.insert(keys, k)
-		end
 
 		return function()
 			i = i + 1
-			if i <= #keys then
-				return self.items[keys[i]]
+			if i <= #self.items then
+				return self.items[i]
 			end
 		end
 	end

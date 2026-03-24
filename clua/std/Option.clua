@@ -1,0 +1,58 @@
+class Option<T>
+	local has_value: boolean
+	local value: any
+
+	function new()
+		self.has_value = false
+		self.value = nil
+	end
+
+	function new(value: T)
+		self.has_value = true
+		self.value = value
+	end
+
+	function isSome(): boolean
+		return self.has_value
+	end
+
+	function isNone(): boolean
+		return not self.has_value
+	end
+
+	function unwrap(): T
+		if not self.has_value then
+			error("Option.unwrap called on none", 2)
+		end
+
+		return self.value
+	end
+
+	function unwrapOr(default_value: T): T
+		if self.has_value then
+			return self.value
+		end
+
+		return default_value
+	end
+
+	function map<U>(mapper: function(value: T): U): Option<U>
+		if not self.has_value then
+			return new Option<U>()
+		end
+
+		return new Option<U>(mapper(self.value))
+	end
+
+	function filter(predicate: function(value: T): boolean): Option<T>
+		if not self.has_value then
+			return self
+		end
+
+		if predicate(self.value) then
+			return self
+		end
+
+		return new Option<T>()
+	end
+end

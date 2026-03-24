@@ -45,7 +45,14 @@ passed = passed
 		test("Searcher resolves clua.std.List from rocks tree layout", function()
 				with_temp_dir(function(temp_dir)
 					local list_path = temp_dir .. "/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std/List.clua"
-					assert(os.execute('mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"') == true or os.execute('mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"') == 0)
+					assert(
+						os.execute('mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"')
+								== true
+							or os.execute(
+									'mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"'
+								)
+								== 0
+					)
 					local file = assert(io.open(list_path, "w"))
 					file:write([[class List<T>
 	function new()
@@ -54,7 +61,10 @@ end
 ]])
 					file:close()
 
-					local searcher = clua.make_searcher({ path = "", rock_roots = { temp_dir .. "/.luarocks/lib/luarocks/rocks-5.4" } })
+					local searcher = clua.make_searcher({
+						path = "",
+						rock_roots = { temp_dir .. "/.luarocks/lib/luarocks/rocks-5.4" },
+					})
 					local chunk, resolved = searcher("clua.std.List")
 					assert(type(chunk) == "function", "Searcher should return loader function")
 					assert(resolved == list_path, "Searcher should resolve rocks-tree std module path")
@@ -607,6 +617,91 @@ end
 
 				assert(has(lua, "function Wrapper.get(self)"), "Should have get method")
 				assert(has(lua, "function Wrapper.set(self, v)"), "Should have set method")
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+-- Test: std.Option and std.Result runtime behavior
+-- ============================================================================
+passed = passed
+	+ (
+		test("std.Option and std.Result portable APIs", function()
+				local src = [[
+import std.Option
+import std.Result
+
+class App
+	function new()
+		local none: Option<number>
+		none = new Option<number>()
+		assert(none.isNone())
+		assert(none.unwrapOr(7) == 7)
+
+		local some: Option<number>
+		some = new Option<number>(5)
+		assert(some.isSome())
+		assert(some.map(function(v)
+			return v + 3
+		end).unwrap() == 8)
+
+		local ok: Result<number, string>
+		ok = new Result<number, string>(10)
+		assert(ok.isOk())
+		assert(ok.map(function(v)
+			return v * 2
+		end).unwrap() == 20)
+
+		local err: Result<number, string>
+		err = new Result<number, string>("bad", true)
+		assert(err.isErr())
+		assert(err.unwrapOr(9) == 9)
+	end
+end
+]]
+				local lua = compiler.compile(src, "test")
+				local chunk = assert(load(lua), "Compiled Lua must be valid")
+				local App = chunk()
+				local app = App.new()
+				assert(app ~= nil, "App should instantiate")
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+-- Test: std.HashMap behavior
+-- ============================================================================
+passed = passed
+	+ (
+		test("std.HashMap set/get/remove and size", function()
+				local src = [[
+import std.HashMap
+
+class App
+	function new()
+		local map: HashMap<string, number>
+		map = new HashMap<string, number>()
+
+		assert(map.size() == 0)
+		map.set("a", 1)
+		map.set("b", 2)
+		assert(map.size() == 2)
+		assert(map.get("a") == 1)
+		assert(map.has("b"))
+
+		map.remove("a")
+		assert(not map.has("a"))
+		assert(map.size() == 1)
+	end
+end
+]]
+				local lua = compiler.compile(src, "test")
+				local chunk = assert(load(lua), "Compiled Lua must be valid")
+				local App = chunk()
+				local app = App.new()
+				assert(app ~= nil, "App should instantiate")
 			end)
 			and 1
 		or 0
