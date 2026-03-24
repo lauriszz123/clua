@@ -9,6 +9,10 @@ class ArrayList<T>
 		table.insert(self.items, item)
 	end
 
+	function add(index: number, item: T)
+		table.insert(self.items, index, item)
+	end
+
 	function remove(index: number)
 		table.remove(self.items, index)
 	end
@@ -21,8 +25,9 @@ class ArrayList<T>
 		return #self.items
 	end
 
-	function list(): function(): T
+	function iter(): function(): T
 		local i = 0
+
 		return function()
 			i = i + 1
 			if i <= #self.items then

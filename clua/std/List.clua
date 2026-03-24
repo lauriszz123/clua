@@ -9,6 +9,10 @@ class List<T>
 		self.items[key] = item
 	end
 
+	function has(key: string): boolean
+		return self.items[key] ~= nil
+	end
+
 	function get(key: string): T
 		return self.items[key]
 	end
@@ -17,14 +21,24 @@ class List<T>
 		self.items[key] = nil
 	end
 
-	function list(): function(): T
+	function clear()
+		self.items = {}
+	end
+
+	function forEach(callback: function(item: T))
+		for _, item in pairs(self.items) do
+			callback(item)
+		end
+	end
+
+	function iter(): function(): T
 		local keys = {}
+		local i = 0
 
 		for k in pairs(self.items) do
 			table.insert(keys, k)
 		end
 
-		local i = 0
 		return function()
 			i = i + 1
 			if i <= #keys then

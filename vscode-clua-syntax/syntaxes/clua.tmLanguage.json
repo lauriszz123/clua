@@ -467,7 +467,7 @@
               "name": "punctuation.accessor.dot.clua"
             },
             "3": {
-              "name": "entity.name.function.method.clua"
+              "name": "entity.name.function.call.clua"
             },
             "4": {
               "name": "punctuation.section.arguments.begin.clua"
@@ -485,7 +485,7 @@
               "name": "punctuation.accessor.dot.clua"
             },
             "3": {
-              "name": "entity.name.function.method.clua"
+              "name": "entity.name.function.call.clua"
             },
             "4": {
               "name": "punctuation.section.arguments.begin.clua"
@@ -513,7 +513,7 @@
               "name": "punctuation.accessor.dot.clua"
             },
             "5": {
-              "name": "entity.name.function.method.clua"
+              "name": "entity.name.function.call.clua"
             },
             "6": {
               "name": "punctuation.section.arguments.begin.clua"
@@ -552,7 +552,7 @@
               "name": "punctuation.accessor.dot.clua"
             },
             "3": {
-              "name": "entity.name.function.method.clua"
+              "name": "entity.name.function.call.clua"
             },
             "4": {
               "name": "punctuation.section.arguments.begin.clua"

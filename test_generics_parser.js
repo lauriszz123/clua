@@ -633,6 +633,78 @@ end
 });
 
 // ============================================================================
+// Test: Diagnostics catch wrong argument type inside nested expression calls
+// ============================================================================
+test("Diagnostics catch wrong method argument type in nested expression", function () {
+	const src = `
+class ArrayList<T>
+  function get(index: number): T
+  end
+end
+
+class Main
+  list: ArrayList<number>
+  function run()
+    print("Value: " .. self.list.get("test"))
+  end
+end
+`;
+	const doc = { getText: () => src };
+	const diags = validateTextDocument(doc, new Map());
+	const mismatchDiag = diags.find(
+		(d) =>
+			d.message.includes("Argument 1") &&
+			d.message.includes("ArrayList<number>.get") &&
+			d.message.includes("expects number") &&
+			d.message.includes("got string"),
+	);
+	assert(
+		mismatchDiag,
+		"Should report wrong type for nested method-call argument",
+	);
+	assert(
+		mismatchDiag.range.start.character > 0,
+		"Nested call mismatch should not be highlighted at line start",
+	);
+	has(
+		diags,
+		(d) =>
+			d.message.includes("Argument 1") &&
+			d.message.includes("ArrayList<number>.get") &&
+			d.message.includes("expects number") &&
+			d.message.includes("got string"),
+		"Should report wrong type for nested method-call argument",
+	);
+});
+
+// ============================================================================
+// Test: Diagnostics accept matching overloaded method call on generic field
+// ============================================================================
+test("Diagnostics accept matching overload on generic field", function () {
+	const src = `
+class ArrayList<T>
+  function add(item: T)
+  end
+  function add(index: number, item: T)
+  end
+end
+
+class Main
+  list: ArrayList<number>
+  function run()
+    self.list.add(1, 2)
+  end
+end
+`;
+	const doc = { getText: () => src };
+	const diags = validateTextDocument(doc, new Map());
+	assert(
+		!diags.some((d) => d.message.includes("ArrayList<number>.add")),
+		"Should not report parameter diagnostics when an overload matches",
+	);
+});
+
+// ============================================================================
 // Test: Generic in nested scope
 // ============================================================================
 test("Generic type in nested class context", function () {

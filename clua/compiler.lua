@@ -144,10 +144,18 @@ local function validate_function_type(core)
 		end
 
 		for _, param_type in ipairs(params) do
-			if param_type == "" then
+			local normalized_param = trim(param_type)
+			if normalized_param == "" then
 				return false, nil
 			end
-			local ok = validate_type_name(param_type)
+
+			-- Support named function-type params, e.g. function(item: T)
+			local _, named_param_type = normalized_param:match("^([%a_][%w_]*)%s*:%s*(.-)%s*$")
+			if named_param_type and named_param_type ~= "" then
+				normalized_param = named_param_type
+			end
+
+			local ok = validate_type_name(normalized_param)
 			if not ok then
 				return false, nil
 			end
@@ -724,8 +732,11 @@ local function emit_method_implementation(
 		emit_body_with_field_checks(out, method.body, fields_by_name, private_fields, class_name, method.name)
 
 		for _, instance_method in ipairs(instance_methods) do
-			out[#out + 1] = ("  self.%s = function(...)"):format(instance_method)
-			out[#out + 1] = ("    return %s.%s(self, ...)"):format(class_name, instance_method)
+			out[#out + 1] = ("  self.%s = function(__first, ...)"):format(instance_method)
+			out[#out + 1] = "    if __first == self then"
+			out[#out + 1] = ("      return %s.%s(self, ...)"):format(class_name, instance_method)
+			out[#out + 1] = "    end"
+			out[#out + 1] = ("    return %s.%s(self, __first, ...)"):format(class_name, instance_method)
 			out[#out + 1] = "  end"
 		end
 

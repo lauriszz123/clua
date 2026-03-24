@@ -10,6 +10,8 @@ From this repository:
 luarocks make clua-scm-1.rockspec
 ```
 
+For local development, prefer `luarocks make` over installing a packed `scm` source rock. An `scm` rock built with `luarocks pack clua-scm-1.rockspec` is generated from `source.url`, so it may not include unpushed local changes.
+
 For project-local installs (recommended for editor/LSP resolution in any workspace):
 
 ```bash

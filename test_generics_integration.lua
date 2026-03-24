@@ -42,6 +42,35 @@ end
 -- ============================================================================
 passed = passed
 	+ (
+		test("Searcher resolves clua.std.List from rocks tree layout", function()
+				with_temp_dir(function(temp_dir)
+					local list_path = temp_dir .. "/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std/List.clua"
+					assert(os.execute('mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"') == true or os.execute('mkdir -p "' .. temp_dir .. '/.luarocks/lib/luarocks/rocks-5.4/clua/scm-1/clua/std"') == 0)
+					local file = assert(io.open(list_path, "w"))
+					file:write([[class List<T>
+	function new()
+	end
+end
+]])
+					file:close()
+
+					local searcher = clua.make_searcher({ path = "", rock_roots = { temp_dir .. "/.luarocks/lib/luarocks/rocks-5.4" } })
+					local chunk, resolved = searcher("clua.std.List")
+					assert(type(chunk) == "function", "Searcher should return loader function")
+					assert(resolved == list_path, "Searcher should resolve rocks-tree std module path")
+					local List = chunk()
+					assert(List and List.new, "Resolved module should return List class")
+				end)
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+-- Test: Runtime import std.List resolves through clua.std alias
+-- ============================================================================
+passed = passed
+	+ (
 		test("Runtime import std.List resolves through clua.std alias", function()
 				with_temp_dir(function(temp_dir)
 					local app_path = temp_dir .. "/app.clua"
@@ -67,6 +96,42 @@ end
 					assert(app, "Should instantiate App")
 					package.path = old_path
 				end)
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+-- Test: Compiler/runtime type mismatch on ArrayList.get(index:number)
+-- ============================================================================
+passed = passed
+	+ (
+		test("Runtime type mismatch for ArrayList.get", function()
+				local src = [[
+import std.ArrayList
+
+class App
+	local list: ArrayList<number>
+
+	function new()
+		self.list = new ArrayList<number>()
+		self.list.add(1)
+		print(self.list.get("test"))
+	end
+end
+]]
+				local lua = compiler.compile(src, "test")
+				local chunk = assert(load(lua), "Compiled Lua should be valid")
+				local App = chunk()
+				local ok, err = pcall(function()
+					App.new()
+				end)
+
+				assert(not ok, "Type mismatch should fail at runtime")
+				assert(
+					has(tostring(err), "expected number, got string"),
+					"Error should report number/string type mismatch"
+				)
 			end)
 			and 1
 		or 0

@@ -65,14 +65,94 @@ local function import_aliases_for(module_name)
 	return { module_name }
 end
 
+local function lua_version_suffix()
+	local version = tostring(_VERSION or ""):match("(%d+%.%d+)")
+	return version or "5.1"
+end
+
+local function file_exists(path)
+	local file = io.open(path, "rb")
+	if file then
+		file:close()
+		return true
+	end
+	return false
+end
+
+local function default_rock_roots()
+	local version = lua_version_suffix()
+	local roots = {
+		"./.luarocks/lib/luarocks/rocks-" .. version,
+		"./lib/lib/luarocks/rocks-" .. version,
+	}
+
+	local home = os.getenv("HOME") or os.getenv("USERPROFILE")
+	if home and home ~= "" then
+		roots[#roots + 1] = home .. "/.luarocks/lib/luarocks/rocks-" .. version
+	end
+
+	roots[#roots + 1] = "/usr/local/lib/luarocks/rocks-" .. version
+	roots[#roots + 1] = "/usr/lib/luarocks/rocks-" .. version
+
+	return roots
+end
+
+local function list_subdirs(path)
+	local command
+	if package.config:sub(1, 1) == "\\" then
+		command = 'dir /b /ad "' .. path .. '" 2>nul'
+	else
+		command = 'ls -1 "' .. path .. '" 2>/dev/null'
+	end
+
+	local pipe = io.popen(command)
+	if not pipe then
+		return {}
+	end
+
+	local out = {}
+	for line in pipe:lines() do
+		if line ~= "" and line ~= "." and line ~= ".." then
+			out[#out + 1] = line
+		end
+	end
+	pipe:close()
+	return out
+end
+
+local function search_rocks_tree(module_name, rock_roots)
+	local module_rel = module_name:gsub("%.", "/")
+	local rock_name = module_name:match("^([%a_][%w_]*)") or module_name
+	for _, root in ipairs(rock_roots or {}) do
+		local package_root = root .. "/" .. rock_name
+		for _, version_dir in ipairs(list_subdirs(package_root)) do
+			local base = package_root .. "/" .. version_dir .. "/"
+			local candidates = {
+				base .. module_rel .. ".clua",
+				base .. module_rel .. "/init.clua",
+			}
+			for _, candidate in ipairs(candidates) do
+				if file_exists(candidate) then
+					return candidate
+				end
+			end
+		end
+	end
+	return nil
+end
+
 function M.make_searcher(opts)
 	opts = opts or {}
 	local clua_path = opts.path or default_clua_path()
+	local rock_roots = opts.rock_roots or default_rock_roots()
 
 	return function(module_name)
 		local errors = {}
 		for _, candidate_name in ipairs(import_aliases_for(module_name)) do
 			local module_file, search_err = package.searchpath(candidate_name, clua_path)
+			if not module_file then
+				module_file = search_rocks_tree(candidate_name, rock_roots)
+			end
 			if module_file then
 				local chunk, load_err = M.loadfile(module_file)
 				if not chunk then

@@ -1138,20 +1138,31 @@ connection.onHover((params) => {
 			const typeParamMap = buildTypeParamMap(targetClass, receiverType);
 			const targetOverloads = getMethodOverloads(targetClass, word);
 			if (targetOverloads.length) {
-				const method = targetOverloads[0];
-				if (method.isPrivate && !allowPrivate) {
+				const visibleOverloads = targetOverloads.filter(
+					(overload) => !overload.isPrivate || allowPrivate,
+				);
+				if (!visibleOverloads.length) {
 					return null;
 				}
-				const specializedMethod = specializeMethod(method, typeParamMap);
-				const specializedDocs = specializeDocs(method.docs, typeParamMap);
-				return makeHover(
-					buildMethodDisplayLabel(
-						`function ${targetClass.name}.${method.name}`,
+				const signatureLines = visibleOverloads.map((overload) => {
+					const specializedMethod = specializeMethod(overload, typeParamMap);
+					const specializedDocs = specializeDocs(overload.docs, typeParamMap);
+					return buildMethodDisplayLabel(
+						`function ${targetClass.name}.${overload.name}`,
 						specializedMethod,
 						specializedDocs,
-					),
-					specializedDocs,
-				);
+					);
+				});
+				const primaryDocs =
+					visibleOverloads.find(
+						(overload) =>
+							overload.docs &&
+							(typeof overload.docs.description === "string"
+								? overload.docs.description.trim().length > 0
+								: false),
+					) || visibleOverloads[0];
+				const specializedDocs = specializeDocs(primaryDocs.docs, typeParamMap);
+				return makeHover(signatureLines, specializedDocs);
 			}
 
 			if (targetClass.fields.has(word)) {
@@ -1224,15 +1235,22 @@ connection.onHover((params) => {
 	if (classInfo) {
 		const classOverloads = getMethodOverloads(classInfo, word);
 		if (classOverloads.length) {
-			const method = classOverloads[0];
-			return makeHover(
+			const signatureLines = classOverloads.map((overload) =>
 				buildMethodDisplayLabel(
-					`function ${classInfo.name}.${method.name}`,
-					method,
-					method.docs,
+					`function ${classInfo.name}.${overload.name}`,
+					overload,
+					overload.docs,
 				),
-				method.docs,
 			);
+			const primaryDocs =
+				classOverloads.find(
+					(overload) =>
+						overload.docs &&
+						(typeof overload.docs.description === "string"
+							? overload.docs.description.trim().length > 0
+							: false),
+				) || classOverloads[0];
+			return makeHover(signatureLines, primaryDocs.docs);
 		}
 	}
 

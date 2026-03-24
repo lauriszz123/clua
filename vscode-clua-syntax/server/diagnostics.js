@@ -9,6 +9,7 @@ const {
 	findParam,
 	inferExpressionType,
 	resolveClassByType,
+	getMethodOverloads,
 } = require("./parser");
 
 function collectGenericTypeParams(classInfo, methodInfo = null) {
@@ -115,10 +116,32 @@ function splitTopLevelCommas(text) {
 	let angleDepth = 0;
 	let parenDepth = 0;
 	let bracketDepth = 0;
+	let stringQuote = null;
+	let escapeNext = false;
 	let start = 0;
 
 	for (let i = 0; i < text.length; i += 1) {
 		const ch = text[i];
+		if (stringQuote) {
+			if (escapeNext) {
+				escapeNext = false;
+				continue;
+			}
+			if (ch === "\\") {
+				escapeNext = true;
+				continue;
+			}
+			if (ch === stringQuote) {
+				stringQuote = null;
+			}
+			continue;
+		}
+
+		if (ch === '"' || ch === "'") {
+			stringQuote = ch;
+			continue;
+		}
+
 		if (ch === "<") {
 			angleDepth += 1;
 		} else if (ch === ">") {
@@ -148,6 +171,128 @@ function splitTopLevelCommas(text) {
 	}
 
 	return out;
+}
+
+function maskLineForAnalysis(lineText) {
+	if (!lineText) {
+		return "";
+	}
+
+	let out = "";
+	let quote = null;
+	let escapeNext = false;
+
+	for (let i = 0; i < lineText.length; i += 1) {
+		const ch = lineText[i];
+
+		if (quote) {
+			if (escapeNext) {
+				escapeNext = false;
+				out += " ";
+				continue;
+			}
+			if (ch === "\\") {
+				escapeNext = true;
+				out += " ";
+				continue;
+			}
+			if (ch === quote) {
+				quote = null;
+			}
+			out += " ";
+			continue;
+		}
+
+		if (ch === '"' || ch === "'") {
+			quote = ch;
+			out += " ";
+			continue;
+		}
+
+		if (ch === "-" && i + 1 < lineText.length && lineText[i + 1] === "-") {
+			out += " ".repeat(lineText.length - i);
+			break;
+		}
+
+		out += ch;
+	}
+
+	return out;
+}
+
+function extractSelfFieldMethodCalls(rawLineText, analysisLineText) {
+	if (!rawLineText || !analysisLineText) {
+		return [];
+	}
+
+	const calls = [];
+	const callStartRe =
+		/\bself\.([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+	let callStartMatch;
+
+	while ((callStartMatch = callStartRe.exec(analysisLineText)) !== null) {
+		const fieldName = callStartMatch[1];
+		const methodName = callStartMatch[2];
+		const openParenIndex = callStartMatch.index + callStartMatch[0].length - 1;
+
+		let depth = 1;
+		let closeParenIndex = -1;
+		let stringQuote = null;
+		let escapeNext = false;
+
+		for (let i = openParenIndex + 1; i < analysisLineText.length; i += 1) {
+			const ch = analysisLineText[i];
+
+			if (stringQuote) {
+				if (escapeNext) {
+					escapeNext = false;
+					continue;
+				}
+				if (ch === "\\") {
+					escapeNext = true;
+					continue;
+				}
+				if (ch === stringQuote) {
+					stringQuote = null;
+				}
+				continue;
+			}
+
+			if (ch === '"' || ch === "'") {
+				stringQuote = ch;
+				continue;
+			}
+
+			if (ch === "(") {
+				depth += 1;
+				continue;
+			}
+
+			if (ch === ")") {
+				depth -= 1;
+				if (depth === 0) {
+					closeParenIndex = i;
+					break;
+				}
+			}
+		}
+
+		if (closeParenIndex < 0) {
+			continue;
+		}
+
+		calls.push({
+			fieldName,
+			methodName,
+			argsText: rawLineText.slice(openParenIndex + 1, closeParenIndex).trim(),
+			start: callStartMatch.index,
+			end: closeParenIndex + 1,
+		});
+
+		callStartRe.lastIndex = closeParenIndex + 1;
+	}
+
+	return calls;
 }
 
 function buildTypeParamMapFromTypeRef(typeRef, targetClass) {
@@ -395,12 +540,7 @@ function validateTextDocument(document, workspaceIndex, options = {}) {
 
 				for (let k = methodInfo.bodyStart; k < methodInfo.bodyEnd; k += 1) {
 					const bodyLine = lines[k];
-
-					// Strip comments and string literals so we don't match inside them.
-					const analysisLine = bodyLine
-						.replace(/--.*$/, "")
-						.replace(/"([^"\\]|\\.)*"/g, '""')
-						.replace(/'([^'\\]|\\.)*'/g, "''");
+					const analysisLine = maskLineForAnalysis(bodyLine);
 
 					// Flag self.xxx where xxx is not a declared field or method.
 					const selfAccessRe = /\bself\.([A-Za-z_][A-Za-z0-9_]*)/g;
@@ -470,10 +610,9 @@ function validateTextDocument(document, workspaceIndex, options = {}) {
 						}
 
 						const targetClass = resolved.classInfo;
-						if (
-							targetClass.fields.has(memberName) ||
-							targetClass.methods.has(memberName)
-						) {
+						const hasMethod =
+							getMethodOverloads(targetClass, memberName).length > 0;
+						if (targetClass.fields.has(memberName) || hasMethod) {
 							continue;
 						}
 
@@ -489,13 +628,13 @@ function validateTextDocument(document, workspaceIndex, options = {}) {
 					}
 
 					// Validate method call arity and argument types on class-typed fields.
-					const methodCallRe =
-						/\bself\.([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)/g;
-					let methodCallMatch;
-					while ((methodCallMatch = methodCallRe.exec(analysisLine)) !== null) {
-						const fieldName = methodCallMatch[1];
-						const methodName = methodCallMatch[2];
-						const argsText = (methodCallMatch[3] || "").trim();
+					for (const methodCall of extractSelfFieldMethodCalls(
+						bodyLine,
+						analysisLine,
+					)) {
+						const fieldName = methodCall.fieldName;
+						const methodName = methodCall.methodName;
+						const argsText = methodCall.argsText;
 						const fieldInfo = classInfo.fields.get(fieldName);
 						if (!fieldInfo || isArrayType(fieldInfo.typeName)) {
 							continue;
@@ -511,60 +650,91 @@ function validateTextDocument(document, workspaceIndex, options = {}) {
 						}
 
 						const targetClass = resolved.classInfo;
-						if (!targetClass.methods || !targetClass.methods.has(methodName)) {
+						const overloads = getMethodOverloads(targetClass, methodName);
+						if (!overloads.length) {
 							continue;
 						}
 
-						const methodInfoForCall = targetClass.methods.get(methodName);
-						const expectedParams = methodInfoForCall.params || [];
 						const args = argsText ? splitTopLevelCommas(argsText) : [];
+						const arityMatchedOverloads = overloads.filter(
+							(overload) => (overload.params || []).length === args.length,
+						);
 
-						if (args.length !== expectedParams.length) {
+						if (!arityMatchedOverloads.length) {
 							const rawIdx = bodyLine.indexOf(
 								`self.${fieldName}.${methodName}`,
 							);
-							const startPos = rawIdx >= 0 ? rawIdx : methodCallMatch.index;
+							const startPos = rawIdx >= 0 ? rawIdx : methodCall.start;
+							const expectedArities = Array.from(
+								new Set(overloads.map((o) => (o.params || []).length)),
+							).sort((a, b) => a - b);
 							pushDiag(
 								diagnostics,
 								k,
 								startPos,
 								startPos + `self.${fieldName}.${methodName}`.length,
-								`Method ${fieldInfo.typeName}.${methodName} expects ${expectedParams.length} arguments, got ${args.length}`,
+								`Method ${fieldInfo.typeName}.${methodName} expects ${expectedArities.join(" or ")} arguments, got ${args.length}`,
 							);
 							continue;
 						}
 
-						const typeParamMap = buildTypeParamMapFromTypeRef(
-							fieldInfo.typeName,
-							targetClass,
-						);
-
-						for (let argIndex = 0; argIndex < args.length; argIndex += 1) {
-							const argExpr = args[argIndex];
-							const paramInfo = expectedParams[argIndex];
-							const expectedType = applyTypeParamMap(
-								paramInfo.typeName,
-								typeParamMap,
+						let matchedOverload = null;
+						let mismatch = null;
+						for (const overload of arityMatchedOverloads) {
+							const expectedParams = overload.params || [];
+							const typeParamMap = buildTypeParamMapFromTypeRef(
+								fieldInfo.typeName,
+								targetClass,
 							);
-							const inferredType =
-								inferExpressionType(
-									argExpr,
-									model,
-									classInfo,
-									methodInfo,
-									workspaceIndex,
-								) || inferLiteralType(argExpr);
 
-							if (!expressionMatchesDeclaredType(inferredType, expectedType)) {
-								const argStart = bodyLine.indexOf(argExpr);
-								pushDiag(
-									diagnostics,
-									k,
-									Math.max(argStart, 0),
-									Math.max(argStart, 0) + argExpr.length,
-									`Argument ${argIndex + 1} of ${fieldInfo.typeName}.${methodName} expects ${expectedType}, got ${inferredType || "unknown"}`,
+							let overloadMatches = true;
+							for (let argIndex = 0; argIndex < args.length; argIndex += 1) {
+								const argExpr = args[argIndex];
+								const paramInfo = expectedParams[argIndex];
+								const expectedType = applyTypeParamMap(
+									paramInfo.typeName,
+									typeParamMap,
 								);
+								const inferredType =
+									inferExpressionType(
+										argExpr,
+										model,
+										classInfo,
+										methodInfo,
+										workspaceIndex,
+									) || inferLiteralType(argExpr);
+
+								if (
+									!expressionMatchesDeclaredType(inferredType, expectedType)
+								) {
+									overloadMatches = false;
+									if (!mismatch) {
+										mismatch = {
+											argExpr,
+											argIndex,
+											expectedType,
+											inferredType,
+										};
+									}
+									break;
+								}
 							}
+
+							if (overloadMatches) {
+								matchedOverload = overload;
+								break;
+							}
+						}
+
+						if (!matchedOverload && mismatch) {
+							const argStart = bodyLine.indexOf(mismatch.argExpr);
+							pushDiag(
+								diagnostics,
+								k,
+								Math.max(argStart, 0),
+								Math.max(argStart, 0) + mismatch.argExpr.length,
+								`Argument ${mismatch.argIndex + 1} of ${fieldInfo.typeName}.${methodName} expects ${mismatch.expectedType}, got ${mismatch.inferredType || "unknown"}`,
+							);
 						}
 					}
 
