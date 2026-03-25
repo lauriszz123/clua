@@ -1,5 +1,5 @@
 class HashMap<K, V>
-	local items: table<any, V>
+	local items: table<K, V>
 	local count: number
 
 	function new()
@@ -67,8 +67,8 @@ class HashMap<K, V>
 		return out
 	end
 
-	function entries(): table<string, any>[]
-		local out: table<string, any>[]
+	function entries(): table<K, V>[]
+		local out: table<K, V>[]
 		out = {}
 		for key, value in pairs(self.items) do
 			table.insert(out, { key = key, value = value })

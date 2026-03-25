@@ -27,6 +27,12 @@ local M = {}
 -- Line rewriters
 -- --------------------------------------------------------------------------
 
+local function erase_generic_method_type_params(line)
+	-- Strip explicit type params from generic method calls: .map<integer>( -> .map(
+	-- Only erases <...> that contain identifier-like content (type names).
+	return (line:gsub("(%.%s*[%a_][%w_]*)%s*<%s*[%a_][%w_%s,]*%s*>%s*%(", "%1("))
+end
+
 local function rewrite_new_expressions(line)
 	return (
 		line:gsub("new%s+([%a_][%w_%.<>%,%[%]%s]*)%s*%(", function(type_name)
@@ -58,6 +64,41 @@ local function rewrite_import_statement(line)
 	end
 
 	return rewritten
+end
+
+local function assert_no_bare_generic_call(line, context_name, body_line_no)
+	local code = line:gsub("%-%-.*$", "")  -- strip comments
+	code = code:gsub('"[^"]*"', '""')     -- strip double-quoted strings
+	code = code:gsub("'[^']*'", "''")     -- strip single-quoted strings
+
+	-- Skip function declaration lines (method signatures, standalone functions)
+	local stripped_line = code:match("^%s*(.-)%s*$") or code
+	if stripped_line:match("^function%s") or stripped_line:match("^local%s+function%s") then
+		return
+	end
+
+	local pos = 1
+	while true do
+		-- Only match a plain identifier (no dots) — dotted expressions like
+		-- self.list.map<T>() are method calls and do not need 'new'.
+		local s, e, id, generics = code:find("([%a_][%w_]*)<([^>]-)>%s*%(", pos)
+		if not s then break end
+		local before = code:sub(1, s - 1)
+		-- If preceded by a dot it's a method call — skip.
+		if before:match("%.$") then pos = e + 1; goto continue end
+		if not before:match("new%s+$") then
+			local loc = context_name and (" in " .. context_name) or ""
+			error(
+				("Missing 'new' keyword%s (body line %d): "
+					.. "write 'new %s<%s>(...)' instead of '%s<%s>(...)'"):format(
+					loc, body_line_no, id, generics, id, generics
+				),
+				0
+			)
+		end
+		pos = e + 1
+		::continue::
+	end
 end
 
 -- --------------------------------------------------------------------------
@@ -228,6 +269,7 @@ local function compile_method(class_name, lines, start_idx, class_generic_params
 		params = clean_params,
 		typed_params = typed_params,
 		body = body,
+		body_start = start_idx + 1,
 	},
 		end_idx
 end
@@ -383,7 +425,8 @@ local function emit_method_implementation(
 	fields_by_name,
 	private_fields,
 	private_store_name,
-	instance_methods
+	instance_methods,
+	class_line_map
 )
 	local params = table.concat(method.params, ", ")
 
@@ -411,7 +454,8 @@ local function emit_method_implementation(
 			end
 		end
 
-		emit_body_with_field_checks(out, method.body, fields_by_name, private_fields, class_name, method.name)
+		local body_source_base = method.body_start and (method.body_start - 1) or nil
+		emit_body_with_field_checks(out, method.body, fields_by_name, private_fields, class_name, method.name, body_source_base, class_line_map)
 
 		for _, instance_method in ipairs(instance_methods) do
 			out[#out + 1] = ("  self.%s = function(__first, ...)"):format(instance_method)
@@ -431,7 +475,8 @@ local function emit_method_implementation(
 	out[#out + 1] = ("function %s.%s(self%s%s)"):format(class_name, emitted_name, params ~= "" and ", " or "", params)
 	out[#out + 1] = ("  local __priv = %s[self] or {}"):format(private_store_name)
 	emit_param_asserts(out, class_name, method.name, method.typed_params)
-	emit_body_with_field_checks(out, method.body, fields_by_name, private_fields, class_name, method.name)
+	local body_source_base = method.body_start and (method.body_start - 1) or nil
+	emit_body_with_field_checks(out, method.body, fields_by_name, private_fields, class_name, method.name, body_source_base, class_line_map)
 	out[#out + 1] = "end"
 	out[#out + 1] = ""
 end
@@ -486,7 +531,9 @@ local function emit_try_catch_block(
 	fields_by_name,
 	private_fields,
 	class_name,
-	method_name
+	method_name,
+	source_base,
+	class_line_map
 )
 	local indent = lines[start_idx]:match("^(%s*)") or ""
 	local catch_name = catch_idx and parse_catch_header(lines[catch_idx]) or nil
@@ -507,14 +554,16 @@ local function emit_try_catch_block(
 		fields_by_name,
 		private_fields,
 		class_name,
-		method_name
+		method_name,
+		source_base,
+		class_line_map
 	)
 	out[#out + 1] = indent .. "  end))"
 	out[#out + 1] = indent .. ("  local %s = %s[1]"):format(ok_name, result_name)
 	out[#out + 1] = indent .. ("  local %s = %s[2]"):format(err_name, result_name)
 	if catch_idx then
 		out[#out + 1] = indent .. ("  if not %s then"):format(ok_name)
-		out[#out + 1] = indent .. ("    local %s = %s"):format(bound_error_name, err_name)
+		out[#out + 1] = indent .. ("    local %s = __clua_runtime.remap_error_line(%s, __clua_line_map)"):format(bound_error_name, err_name)
 		emit_statement_lines(
 			out,
 			lines,
@@ -523,7 +572,9 @@ local function emit_try_catch_block(
 			fields_by_name,
 			private_fields,
 			class_name,
-			method_name
+			method_name,
+			source_base,
+			class_line_map
 		)
 		out[#out + 1] = indent .. "  end"
 	end
@@ -536,12 +587,14 @@ local function emit_try_catch_block(
 			fields_by_name,
 			private_fields,
 			class_name,
-			method_name
+			method_name,
+			source_base,
+			class_line_map
 		)
 	end
 	if not catch_idx then
 		out[#out + 1] = indent .. ("  if not %s then"):format(ok_name)
-		out[#out + 1] = indent .. ("    error(%s, 0)"):format(err_name)
+		out[#out + 1] = indent .. ("    error(__clua_runtime.remap_error_line(%s, __clua_line_map), 0)"):format(err_name)
 		out[#out + 1] = indent .. "  end"
 	end
 	out[#out + 1] = indent .. ("  if %s and %s.n > 1 then"):format(ok_name, result_name)
@@ -551,7 +604,7 @@ local function emit_try_catch_block(
 	out[#out + 1] = indent .. "end"
 end
 
-emit_statement_lines = function(out, lines, start_idx, end_idx, fields_by_name, private_fields, class_name, method_name)
+emit_statement_lines = function(out, lines, start_idx, end_idx, fields_by_name, private_fields, class_name, method_name, source_base, class_line_map)
 	if not lines or start_idx > end_idx then
 		return
 	end
@@ -571,21 +624,37 @@ emit_statement_lines = function(out, lines, start_idx, end_idx, fields_by_name, 
 				fields_by_name,
 				private_fields,
 				class_name,
-				method_name
+				method_name,
+				source_base,
+				class_line_map
 			)
 			i = block_end + 1
 		else
+			local context = (class_name and method_name)
+				and (class_name .. "." .. method_name)
+				or (class_name or method_name)
+			assert_no_bare_generic_call(line, context, i)
 			local rewritten = rewrite_new_expressions(rewrite_private_field_access(line, private_fields or {}))
+			rewritten = erase_generic_method_type_params(rewritten)
 			rewritten = strip_typed_local_annotation(rewritten)
 			out[#out + 1] = rewritten
+			if class_line_map then
+				local src = source_base and (source_base + i) or i
+				class_line_map[#out] = src
+			end
+			local prev_len = #out
 			emit_field_assert_if_needed(out, rewritten, fields_by_name, class_name, method_name)
+			if class_line_map and #out > prev_len then
+				local src = source_base and (source_base + i) or i
+				class_line_map[#out] = src
+			end
 			i = i + 1
 		end
 	end
 end
 
-emit_body_with_field_checks = function(out, body, fields_by_name, private_fields, class_name, method_name)
-	emit_statement_lines(out, body, 1, #body, fields_by_name, private_fields, class_name, method_name)
+emit_body_with_field_checks = function(out, body, fields_by_name, private_fields, class_name, method_name, source_base, class_line_map)
+	emit_statement_lines(out, body, 1, #body, fields_by_name, private_fields, class_name, method_name, source_base, class_line_map)
 end
 
 -- --------------------------------------------------------------------------
@@ -662,6 +731,7 @@ local function compile_class(lines, start_idx)
 	end
 
 	local out = {}
+	local class_line_map = {}
 	local private_store_name = ("__clua_private_%s"):format(class_name)
 	local private_fields_table_name = ("__clua_private_fields_%s"):format(class_name)
 	local private_field_entries = {}
@@ -742,7 +812,8 @@ local function compile_class(lines, start_idx)
 				fields_by_name,
 				private_fields,
 				private_store_name,
-				instance_methods
+				instance_methods,
+				class_line_map
 			)
 		else
 			for idx, overload in ipairs(overloads) do
@@ -756,7 +827,8 @@ local function compile_class(lines, start_idx)
 					fields_by_name,
 					private_fields,
 					private_store_name,
-					instance_methods
+					instance_methods,
+					class_line_map
 				)
 			end
 
@@ -805,7 +877,7 @@ local function compile_class(lines, start_idx)
 		out[#out + 1] = ""
 	end
 
-	return out, end_idx, class_name, private_methods
+	return out, end_idx, class_name, private_methods, class_line_map
 end
 
 -- --------------------------------------------------------------------------
@@ -833,6 +905,7 @@ end
 local function strip_typed_locals(line)
 	local updated = rewrite_import_statement(line)
 	updated = strip_typed_local_annotation(updated)
+	updated = erase_generic_method_type_params(updated)
 	return rewrite_new_expressions(updated)
 end
 
@@ -845,24 +918,38 @@ function M.compile(source, chunk_name)
 	internal_symbol_counter = 0
 	validate_semantic_method_calls(lines, chunk_name)
 	local out = {}
+	local line_map = {}  -- maps output line number -> source line number
+	local current_source_line = 0  -- track current source context
 	local saw_class = false
 	local saw_enum = false
 	local saw_typed_function = false
+	local saw_try_catch = false
 	local saw_explicit_return = false
 	local last_decl_name = nil
 	local private_methods_by_class = {}
 
+	local function add_line(output_line, source_line)
+		source_line = source_line or current_source_line
+		out[#out + 1] = output_line
+		line_map[#out] = source_line
+	end
+
 	local i = 1
 	while i <= #lines do
 		local line = lines[i]
+		current_source_line = i
 
 		if line:match("^%s*class%s+") then
-			local class_code, class_end, class_name, private_methods = compile_class(lines, i)
+			local class_code, class_end, class_name, private_methods, class_line_map = compile_class(lines, i)
 			saw_class = true
 			last_decl_name = class_name
 			private_methods_by_class[class_name] = private_methods
+			local base_out = #out
 			for _, class_line in ipairs(class_code) do
-				out[#out + 1] = class_line
+				add_line(class_line, i)
+			end
+			for class_idx, src_line in pairs(class_line_map) do
+				line_map[base_out + class_idx] = src_line
 			end
 			i = class_end + 1
 		elseif line:match("^%s*enum%s+") then
@@ -870,7 +957,7 @@ function M.compile(source, chunk_name)
 			saw_enum = true
 			last_decl_name = enum_name
 			for _, enum_line in ipairs(enum_code) do
-				out[#out + 1] = enum_line
+				add_line(enum_line, i)
 			end
 			i = enum_end + 1
 		elseif line:match("^%s*local%s+function%s+") or line:match("^%s*function%s+") then
@@ -878,7 +965,7 @@ function M.compile(source, chunk_name)
 			if function_code then
 				saw_typed_function = true
 				for _, function_line in ipairs(function_code) do
-					out[#out + 1] = function_line
+					add_line(function_line, i)
 				end
 				i = function_end + 1
 			else
@@ -887,26 +974,45 @@ function M.compile(source, chunk_name)
 				if stripped:match("^%s*return%s") or stripped:match("^%s*return%s*$") then
 					saw_explicit_return = true
 				end
-				out[#out + 1] = stripped
+				add_line(stripped, i)
 				i = i + 1
 			end
 		elseif line:match("^%s*try%s*$") then
 			local catch_idx, finally_idx, block_end = find_try_catch_bounds(lines, i)
-			emit_try_catch_block(out, lines, i, catch_idx, finally_idx, block_end, nil, nil, nil, nil)
+			saw_try_catch = true
+			local top_line_map = {}
+			emit_try_catch_block(out, lines, i, catch_idx, finally_idx, block_end, nil, nil, nil, nil, nil, top_line_map)
+			for abs_idx, src_line in pairs(top_line_map) do
+				line_map[abs_idx] = src_line
+			end
 			i = block_end + 1
 		else
 			assert_no_private_method_access(line, i, private_methods_by_class)
+			assert_no_bare_generic_call(line, nil, i)
 			local stripped = strip_typed_locals(line)
 			if stripped:match("^%s*return%s") or stripped:match("^%s*return%s*$") then
 				saw_explicit_return = true
 			end
-			out[#out + 1] = stripped
+			add_line(stripped, i)
 			i = i + 1
 		end
 	end
 
-	if saw_class or saw_typed_function then
+	if saw_class or saw_typed_function or saw_try_catch then
 		table.insert(out, 1, 'local __clua_runtime = require("clua.runtime")')
+		table.insert(line_map, 1, 0)  -- runtime require has no source line
+	end
+
+	-- Emit line map as a global variable for error remapping
+	if #line_map > 0 then
+		local line_map_src = "local __clua_line_map = {"
+		for j = 1, #line_map do
+			if j > 1 then line_map_src = line_map_src .. ", " end
+			line_map_src = line_map_src .. (line_map[j] or 0)
+		end
+		line_map_src = line_map_src .. "}"
+		table.insert(out, 1, line_map_src)
+		table.insert(line_map, 1, 0)
 	end
 
 	if (saw_class or saw_enum) and not saw_explicit_return and last_decl_name then

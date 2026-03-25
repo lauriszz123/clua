@@ -144,4 +144,40 @@ end]],
 end)
 
 print(("%d passed, %d failed"):format(passed, failed))
+
+-- Verify that error line numbers in catch blocks are remapped to source lines
+local compiler = require("clua.compiler")
+local source = [[class App
+  function new()
+  end
+  function run()
+    error("at line 5 of body")
+  end
+end]]
+-- Source line 5 is "    error("at line 5 of body")"
+-- (class=1, new header=2, new end=3, run header=4, error=5, run end=6, class end=7)
+local compiled = compiler.compile(source, "linetest.clua")
+-- Find where line_map maps the error call
+local map_vals = {}
+local map_str = compiled:match("local __clua_line_map = {([^}]+)}")
+if map_str then
+	for v in map_str:gmatch("(%d+)") do map_vals[#map_vals+1] = tonumber(v) end
+end
+-- Find the Lua line of the error() call
+local lua_line_of_error = nil
+local n = 0
+for line in compiled:gmatch("[^\n]+") do
+	n = n + 1
+	if line:find("at line 5 of body", 1, true) then lua_line_of_error = n end
+end
+if lua_line_of_error and map_vals[lua_line_of_error] == 5 then
+	print("PASS line numbers remapped correctly (source line 5)")
+	passed = passed + 1
+else
+	local got = map_vals[lua_line_of_error]
+	print("FAIL line number remap: error at Lua line " .. tostring(lua_line_of_error)
+		.. ", map[" .. tostring(lua_line_of_error) .. "]=" .. tostring(got) .. " (wanted 5)")
+	failed = failed + 1
+end
+
 return failed == 0

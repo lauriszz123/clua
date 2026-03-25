@@ -1,5 +1,24 @@
 local M = {}
 
+local function remap_error_line(err_msg, line_map)
+	if type(err_msg) ~= "string" then return err_msg end
+	if not line_map then return err_msg end
+
+	-- Typical format: "./file.clua:LUA_LINE: message"
+	local file, lua_line, rest = err_msg:match("^(.+):(%d+):(.*)$")
+	if not file or not lua_line then return err_msg end
+
+	lua_line = tonumber(lua_line)
+	local source_line = line_map[lua_line]
+	if source_line and source_line > 0 then
+		return file .. ":" .. source_line .. ":" .. rest
+	end
+
+	return err_msg
+end
+
+M.remap_error_line = remap_error_line
+
 local BUILTIN_TYPES = {
 	["nil"] = true,
 	["boolean"] = true,

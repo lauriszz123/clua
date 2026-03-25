@@ -5,24 +5,90 @@ class List<T>
 		self.items = {}
 	end
 
-	function add(item: T)
+	function append(item: T)
 		table.insert(self.items, item)
 	end
 
-	function add(index: number, item: T)
+	function insert(index: number, item: T)
+		if index < 1 then
+			error("List index must be >= 1", 2)
+		elseif index > #self.items + 1 then
+			error("List index out of bounds", 2)
+		end
+
 		table.insert(self.items, index, item)
 	end
 
+	function set(index: number, item: T)
+		if index < 1 then
+			error("List index must be >= 1", 2)
+		elseif index > #self.items then
+			error("List index out of bounds", 2)
+		end
+
+		self.items[index] = item
+	end
+
 	function remove(index: number)
+		if index < 1 then
+			error("List index must be >= 1", 2)
+		elseif index > #self.items then
+			error("List index out of bounds", 2)
+		end
+
 		table.remove(self.items, index)
 	end
 
 	function get(index: number): T
+		if index < 1 then
+			error("List index must be >= 1", 2)
+		elseif index > #self.items then
+			error("List index out of bounds", 2)
+		end
+
 		return self.items[index]
+	end
+
+	function contains(item: T): boolean
+		for _, v in ipairs(self.items) do
+			if v == item then
+				return true
+			end
+		end
+
+		return false
 	end
 
 	function size(): number
 		return #self.items
+	end
+
+	function map<U>(func: function(value: T): U): List<U>
+		local newList: List<U> = new List<U>()
+
+		for _, item in ipairs(self.items) do
+			newList.append(func(item))
+		end
+
+		return newList
+	end
+
+	function filter(func: function(value: T): boolean): List<T>
+		local newList: List<T> = new List<T>()
+
+		for _, item in ipairs(self.items) do
+			if func(item) then
+				newList.append(item)
+			end
+		end
+
+		return newList
+	end
+
+	function forEach(func: function(item: T))
+		for _, item in ipairs(self.items) do
+			func(item)
+		end
 	end
 
 	function iter(): function(): T

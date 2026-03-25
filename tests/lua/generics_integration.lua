@@ -741,6 +741,143 @@ end
 	)
 
 -- ============================================================================
+-- Test: std.List basic API
+-- ============================================================================
+passed = passed
+	+ (
+		test("std.List: append, insert, set, get, contains, remove, size", function()
+				local chunk, err = clua.loadstring(
+					[[import std.List
+
+class App
+	function new()
+	end
+
+	function run(): boolean
+		local list: List<number> = new List<number>()
+		list.append(10)
+		list.append(20)
+		list.append(30)
+		assert(list.size() == 3)
+		assert(list.get(1) == 10)
+		assert(list.get(2) == 20)
+		assert(list.get(3) == 30)
+		list.set(2, 99)
+		assert(list.get(2) == 99)
+		list.insert(1, 5)
+		assert(list.get(1) == 5)
+		assert(list.get(2) == 10)
+		assert(list.size() == 4)
+		assert(list.contains(5))
+		assert(not list.contains(999))
+		list.remove(1)
+		assert(list.get(1) == 10)
+		assert(list.size() == 3)
+		return true
+	end
+end
+]],
+					"@list_basic_test.clua"
+				)
+				assert(chunk, tostring(err))
+				local App = chunk()
+				local app = App.new()
+				assert(app.run() == true)
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+-- Test: Generic method type parameters stripped
+-- ============================================================================
+passed = passed
+	+ (
+		test("Generic method calls with explicit type params are compiled", function()
+				local chunk, err = clua.loadstring(
+					[[import std.List
+
+class App
+	function new()
+	end
+
+	function run(): boolean
+		local list: List<number> = new List<number>()
+		list.append(10)
+		list.append(20)
+		list.append(30)
+		local doubled: List<number> = list.map<number>(function(x) return x * 2 end)
+		assert(doubled.size() == 3)
+		assert(doubled.get(1) == 20)
+		assert(doubled.get(2) == 40)
+		assert(doubled.get(3) == 60)
+		return true
+	end
+end
+]],
+					"@generic_method_type_params.clua"
+				)
+				assert(chunk, tostring(err))
+				local App = chunk()
+				local app = App.new()
+				assert(app.run() == true)
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
+-- Test: std.List higher-order methods
+-- ============================================================================
+passed = passed
+	+ (
+		test("std.List: map, filter, forEach, iter", function()
+				local chunk, err = clua.loadstring(
+					[[import std.List
+
+class App
+	function new()
+	end
+
+	function run(): boolean
+		local list: List<number> = new List<number>()
+		list.append(10)
+		list.append(99)
+		list.append(30)
+		local sum = 0
+		list.forEach(function(item) sum = sum + item end)
+		assert(sum == 139)
+		local doubled: List<number> = list.map(function(item) return item * 2 end)
+		assert(doubled.size() == 3)
+		assert(doubled.get(1) == 20)
+		assert(doubled.get(2) == 198)
+		local big: List<number> = list.filter(function(item) return item > 50 end)
+		assert(big.size() == 1)
+		assert(big.get(1) == 99)
+		local count = 0
+		local it = list.iter()
+		while true do
+			local val = it()
+			if val == nil then break end
+			count = count + 1
+		end
+		assert(count == 3)
+		return true
+	end
+end
+]],
+					"@list_hof_test.clua"
+				)
+				assert(chunk, tostring(err))
+				local App = chunk()
+				local app = App.new()
+				assert(app.run() == true)
+			end)
+			and 1
+		or 0
+	)
+
+-- ============================================================================
 -- Print summary
 -- ============================================================================
 print("")
