@@ -2,45 +2,54 @@
   "Class": {
     "prefix": "class",
     "body": [
-      "class ${1:Name}",
-      "\tvar ${2:field}: ${3:number}",
+      "class ${1:ClassName}",
+      "\tvar ${2:fieldName}: ${3:Type}",
       "",
-      "\tfunction new(${4:value}: ${3:number})",
-      "\t\tself.${2:field} = ${4:value}",
+      "\tfunction new(${4:paramName}: ${5:Type})",
+      "\t\tself.${2:fieldName} = ${4:paramName}",
       "\tend",
       "end",
       "",
-      "return ${1:Name}"
+      "return ${1:ClassName}"
     ],
     "description": "Create a CLua class"
   },
   "Method": {
     "prefix": "method",
     "body": [
-      "function ${1:name}(${2:param}: ${3:number})",
+      "function ${1:methodName}(${2:paramName}: ${3:Type}): ${4:ReturnType}",
       "\t${0}",
       "end"
     ],
     "description": "Create a typed CLua method"
   },
+  "Function": {
+    "prefix": "func",
+    "body": [
+      "local function ${1:functionName}(${2:paramName}: ${3:Type}): ${4:ReturnType}",
+      "\t${0}",
+      "end"
+    ],
+    "description": "Create a typed CLua function"
+  },
   "Var": {
     "prefix": "var",
     "body": [
-      "var ${1:name}: ${2:number}${3: = ${4:0}}"
+      "var ${1:fieldName}: ${2:Type}${3: = ${4:value}}${0}"
     ],
     "description": "Create a typed CLua field"
   },
   "Typed local": {
     "prefix": "localt",
     "body": [
-      "local ${1:name}: ${2:number} = ${3:0}"
+      "local ${1:varName}: ${2:Type} = ${3:value}${0}"
     ],
     "description": "Create a typed local declaration"
   },
   "Runtime assert": {
     "prefix": "assertt",
     "body": [
-      "__clua_runtime.assert_type(${1:value}, \"${2:number}\", \"${3:where}\")"
+      "__clua_runtime.assert_type(${1:value}, \"${2:expectedType}\", \"${3:location}\")${0}"
     ],
     "description": "Insert a CLua runtime type assertion"
   },
@@ -48,10 +57,10 @@
     "prefix": "try",
     "body": [
       "try",
-      "\t${1}",
+      "\t${1:tryCode}",
       "catch ${2:err}",
-      "\t${0}",
-      "end"
+      "\t${3:catchCode}",
+      "end${0}"
     ],
     "description": "Create a CLua try/catch block"
   },
@@ -59,10 +68,10 @@
     "prefix": "tryf",
     "body": [
       "try",
-      "\t${1}",
+      "\t${1:tryCode}",
       "finally",
-      "\t${0}",
-      "end"
+      "\t${2:finallyCode}",
+      "end${0}"
     ],
     "description": "Create a CLua try/finally block"
   },
@@ -70,12 +79,12 @@
     "prefix": "trycf",
     "body": [
       "try",
-      "\t${1}",
+      "\t${1:tryCode}",
       "catch ${2:err}",
-      "\t${3}",
+      "\t${3:catchCode}",
       "finally",
-      "\t${0}",
-      "end"
+      "\t${4:finallyCode}",
+      "end${0}"
     ],
     "description": "Create a CLua try/catch/finally block"
   }

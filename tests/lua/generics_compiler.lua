@@ -632,14 +632,8 @@ end
 					compiler.compile(src, "test")
 				end)
 				assert(not ok, "Should raise a compile error when 'new' keyword is missing")
-				assert(
-					has(tostring(err), "new"),
-					"Error should mention 'new': " .. tostring(err)
-				)
-				assert(
-					has(tostring(err), "List"),
-					"Error should mention the class name: " .. tostring(err)
-				)
+				assert(has(tostring(err), "new"), "Error should mention 'new': " .. tostring(err))
+				assert(has(tostring(err), "List"), "Error should mention the class name: " .. tostring(err))
 			end)
 			and 1
 		or 0

@@ -3,7 +3,7 @@
   "displayName": "CLua Syntax",
   "description": "Syntax highlighting for .clua files",
   "icon": "logo.png",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "publisher": "local",
   "private": true,
   "main": "./extension.js",

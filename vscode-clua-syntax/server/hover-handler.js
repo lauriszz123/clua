@@ -29,6 +29,7 @@ function registerHoverHandler({
 	buildClassTypeHoverData,
 	getLoveFunction,
 	getLoveNamespace,
+	resolveCallbackParameterType,
 }) {
 	connection.onHover((params) => {
 		const hoverStartMs = Date.now();
@@ -128,13 +129,24 @@ function registerHoverHandler({
 				return makeHover(entry.signature, fakeDocs);
 			}
 
-			const receiverType = inferExpressionType(
+			let receiverType = inferExpressionType(
 				receiverExpr,
 				model,
 				classInfo,
 				methodInfo,
 				workspaceIndex,
 			);
+			if (!receiverType && /^[A-Za-z_][A-Za-z0-9_]*$/.test(receiverExpr)) {
+				receiverType = resolveCallbackParameterType(
+					model.lines,
+					params.position.line,
+					receiverExpr,
+					model,
+					classInfo,
+					methodInfo,
+					workspaceIndex,
+				);
+			}
 			const resolvedClass = resolveClassByType(
 				receiverType,
 				model,
@@ -183,6 +195,10 @@ function registerHoverHandler({
 					);
 				}
 			}
+
+			// In member access context (receiver.member), do not fall back to unqualified
+			// symbol lookup, otherwise `scene.draw` can incorrectly resolve to `self.draw`.
+			return null;
 		}
 
 		if (LUA_GLOBALS[word]) {
@@ -280,6 +296,20 @@ function registerHoverHandler({
 		if (model.topLevelLocals && model.topLevelLocals.has(word)) {
 			const localInfo = model.topLevelLocals.get(word);
 			return makeHover(`local ${localInfo.name}: ${localInfo.typeName}`, null);
+		}
+
+		// Try to resolve as callback parameter
+		const callbackParamType = resolveCallbackParameterType(
+			model.lines,
+			params.position.line,
+			word,
+			model,
+			classInfo,
+			methodInfo,
+			workspaceIndex,
+		);
+		if (callbackParamType) {
+			return makeHover(`callback parameter ${word}: ${callbackParamType}`, null);
 		}
 
 		const elapsedMs = Date.now() - hoverStartMs;

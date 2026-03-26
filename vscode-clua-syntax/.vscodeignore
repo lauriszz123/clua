@@ -1,0 +1,6 @@
+clua-syntax.vsix
+clua-syntax@0.1.0
+tests/**
+node_modules/.bin/**
+**/*.log
+package-lock.json

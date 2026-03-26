@@ -1,6 +1,12 @@
 local M = {}
 local unpack_args = (table and table.unpack) or unpack
 
+if table and type(table.pack) ~= "function" then
+	function table.pack(...)
+		return { n = select("#", ...), ... }
+	end
+end
+
 local Love = {
 	__name = "Love",
 }

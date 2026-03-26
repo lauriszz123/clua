@@ -127,6 +127,7 @@ const {
 	specializeDocs,
 	specializeMethod,
 	resolveCallSignature,
+	resolveCallbackParameterType,
 } = createLspHelpers({
 	documents,
 	getWorkspaceFolders: () => workspaceFolders,
@@ -172,6 +173,7 @@ registerHoverHandler({
 	buildClassTypeHoverData,
 	getLoveFunction,
 	getLoveNamespace,
+	resolveCallbackParameterType,
 });
 
 registerCompletionHandler({
@@ -199,6 +201,9 @@ registerCompletionHandler({
 	LOVE_NAMESPACES,
 	getLoveChildren,
 	getMethodOverloads,
+	resolveCallbackParameterType,
+	resolveClassByType,
+	buildTypeParamMap,
 });
 
 registerDefinitionHandler({
@@ -216,6 +221,7 @@ registerDefinitionHandler({
 	resolveClassByType,
 	getMethodOverloads,
 	getImportedModuleForSymbol,
+	resolveCallbackParameterType,
 });
 
 connection.onSignatureHelp((params) => {
@@ -318,6 +324,7 @@ connection.onSignatureHelp((params) => {
 		classInfo,
 		methodInfo,
 		workspaceIndex,
+		params.position.line,
 	);
 	if (!resolved) {
 		return null;
@@ -375,6 +382,8 @@ function sendDiagnostics(document) {
 	const diagnostics = validateTextDocument(document, workspaceIndex, {
 		resolveImport: (modulePath) =>
 			resolveImportTarget(modulePath, document.uri),
+		resolveCallbackParameterType: (lines, lineIdx, paramName, model, classInfo, methodInfo, wi) =>
+			resolveCallbackParameterType(lines, lineIdx, paramName, model, classInfo, methodInfo, wi),
 	});
 	debugLog(`diagnostics uri=${document.uri} count=${diagnostics.length}`);
 	connection.sendDiagnostics({

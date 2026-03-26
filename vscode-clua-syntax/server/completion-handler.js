@@ -5,6 +5,23 @@ const {
 	getContextAwareSnippetItems,
 } = require("./completion");
 
+function buildMethodInsertText(method, docs) {
+	const params = method.params || [];
+	if (!params.length) {
+		return `${method.name}()`;
+	}
+
+	const placeholders = params.map((param, index) => {
+		const doc = docs && docs.params ? docs.params.get(param.name) : null;
+		const label = doc && doc.typeName
+			? `${param.name}: ${doc.typeName}`
+			: `${param.name}: ${param.typeName}`;
+		return `\${${index + 1}:${label}}`;
+	});
+
+	return `${method.name}(${placeholders.join(", ")})`;
+}
+
 function registerCompletionHandler({
 	connection,
 	documents,
@@ -30,6 +47,9 @@ function registerCompletionHandler({
 	LOVE_NAMESPACES,
 	getLoveChildren,
 	getMethodOverloads,
+	resolveCallbackParameterType,
+	resolveClassByType,
+	buildTypeParamMap,
 }) {
 	function mergeWithContextSnippets(baseItems, model, line, beforeCursor) {
 		const snippetItems = getContextAwareSnippetItems({
@@ -73,13 +93,58 @@ function registerCompletionHandler({
 			methodInfo,
 			workspaceIndex,
 		);
-		const completionClass = completionTarget ? completionTarget.classInfo : null;
-		const completionAllowsPrivate = completionTarget
+		let completionClass = completionTarget ? completionTarget.classInfo : null;
+		let completionAllowsPrivate = completionTarget
 			? completionTarget.allowPrivate
 			: false;
-		const completionTypeParamMap = completionTarget
+		let completionTypeParamMap = completionTarget
 			? completionTarget.typeParamMap
 			: null;
+
+		const memberReceiverMatch = beforeCursor.match(
+			/([A-Za-z_][A-Za-z0-9_\.]*)\s*\.\s*([A-Za-z0-9_]*)$/,
+		);
+		if (
+			!completionClass &&
+			memberReceiverMatch &&
+			/^[A-Za-z_][A-Za-z0-9_]*$/.test(memberReceiverMatch[1])
+		) {
+			const callbackReceiverType = resolveCallbackParameterType(
+				model.lines,
+				params.position.line,
+				memberReceiverMatch[1],
+				model,
+				classInfo,
+				methodInfo,
+				workspaceIndex,
+			);
+			if (callbackReceiverType) {
+				const callbackResolved = resolveClassByType(
+					callbackReceiverType,
+					model,
+					workspaceIndex,
+				);
+				if (callbackResolved && callbackResolved.classInfo) {
+					completionClass = callbackResolved.classInfo;
+					completionAllowsPrivate = false;
+					completionTypeParamMap = buildTypeParamMap(
+						callbackResolved.classInfo,
+						callbackReceiverType,
+					);
+				}
+			}
+		}
+
+		if (memberReceiverMatch && !completionClass) {
+			return [];
+		}
+
+		const completionMemberMatch = beforeCursor.match(
+			/[A-Za-z_][A-Za-z0-9_\.]*\s*\.\s*([A-Za-z0-9_]*)$/,
+		);
+		const typedMemberPrefix = completionMemberMatch
+			? (completionMemberMatch[1] || "").toLowerCase()
+			: "";
 
 		const items = [];
 
@@ -129,6 +194,12 @@ function registerCompletionHandler({
 				if (field.isPrivate && !completionAllowsPrivate) {
 					continue;
 				}
+				if (
+					typedMemberPrefix !== "" &&
+					!field.name.toLowerCase().startsWith(typedMemberPrefix)
+				) {
+					continue;
+				}
 				items.push({
 					label: field.name,
 					kind: CompletionItemKind.Field,
@@ -139,6 +210,12 @@ function registerCompletionHandler({
 
 			for (const method of completionClass.methods.values()) {
 				if (method.isPrivate && !completionAllowsPrivate) {
+					continue;
+				}
+				if (
+					typedMemberPrefix !== "" &&
+					!method.name.toLowerCase().startsWith(typedMemberPrefix)
+				) {
 					continue;
 				}
 				const specializedMethod = specializeMethod(
@@ -156,6 +233,11 @@ function registerCompletionHandler({
 					label: method.name,
 					kind: CompletionItemKind.Method,
 					detail: `method ${method.name}(${paramsText})`,
+					insertText: buildMethodInsertText(
+						specializedMethod,
+						specializedDocs,
+					),
+					insertTextFormat: InsertTextFormat.Snippet,
 					documentation: renderDocsText(specializedDocs),
 				});
 			}

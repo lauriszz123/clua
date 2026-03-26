@@ -293,22 +293,90 @@ function createLspHelpers({
 
 	function splitTopLevelCommas(text) {
 		const out = [];
-		let depth = 0;
+		let angleDepth = 0;
+		let parenDepth = 0;
+		let bracketDepth = 0;
 		let start = 0;
 
 		for (let i = 0; i < text.length; i += 1) {
 			const ch = text[i];
 			if (ch === "<") {
-				depth += 1;
+				angleDepth += 1;
 			} else if (ch === ">") {
-				depth -= 1;
-			} else if (ch === "," && depth === 0) {
+				angleDepth -= 1;
+			} else if (ch === "(") {
+				parenDepth += 1;
+			} else if (ch === ")") {
+				parenDepth -= 1;
+			} else if (ch === "[") {
+				bracketDepth += 1;
+			} else if (ch === "]") {
+				bracketDepth -= 1;
+			} else if (
+				ch === "," &&
+				angleDepth === 0 &&
+				parenDepth === 0 &&
+				bracketDepth === 0
+			) {
 				out.push(text.slice(start, i).trim());
 				start = i + 1;
 			}
 		}
 		out.push(text.slice(start).trim());
 		return out.filter(Boolean);
+	}
+
+	function getFunctionTypeParameterTypes(typeName) {
+		if (!typeName) {
+			return [];
+		}
+
+		const fnStart = String(typeName).indexOf("function");
+		if (fnStart < 0) {
+			return [];
+		}
+
+		const openParen = String(typeName).indexOf("(", fnStart);
+		if (openParen < 0) {
+			return [];
+		}
+
+		let depth = 1;
+		let closeParen = -1;
+		for (let i = openParen + 1; i < typeName.length; i += 1) {
+			const ch = typeName[i];
+			if (ch === "(") {
+				depth += 1;
+			} else if (ch === ")") {
+				depth -= 1;
+				if (depth === 0) {
+					closeParen = i;
+					break;
+				}
+			}
+		}
+
+		if (closeParen < 0) {
+			return [];
+		}
+
+		const paramsText = typeName.slice(openParen + 1, closeParen).trim();
+		if (!paramsText) {
+			return [];
+		}
+
+		const entries = splitTopLevelCommas(paramsText);
+		const types = [];
+		for (const entry of entries) {
+			const colonIndex = entry.indexOf(":");
+			if (colonIndex < 0) {
+				types.push("any");
+				continue;
+			}
+			types.push(entry.slice(colonIndex + 1).trim() || "any");
+		}
+
+		return types;
 	}
 
 	function buildTypeParamMap(classInfo, resolvedType) {
@@ -417,6 +485,207 @@ function createLspHelpers({
 		};
 	}
 
+	function resolveCallbackParameterType(
+		lines,
+		lineIdx,
+		parameterName,
+		model,
+		classInfo,
+		methodInfo,
+		workspaceIndex,
+	) {
+		// Build full text with line numbers preserved
+		const fullText = lines.join("\n");
+		
+		// Calculate position in full text at the start of the target line
+		let cursorPos = 0;
+		for (let i = 0; i < lineIdx; i += 1) {
+			cursorPos += lines[i].length + 1; // +1 for newline
+		}
+
+		// Search backwards through nested callbacks until we find the function
+		// declaration that actually declares `parameterName`.
+		let searchPos = cursorPos + lines[lineIdx].length;
+		let functionStart = -1;
+		let params = [];
+
+		while (searchPos > 0) {
+			let blockDepth = 0;
+			functionStart = -1;
+
+			for (let i = searchPos - 1; i >= 0; i -= 1) {
+				if (
+					fullText.slice(i, i + 3) === "end" &&
+					(i === 0 || !/[A-Za-z0-9_]/.test(fullText[i - 1])) &&
+					!/[A-Za-z0-9_]/.test(fullText[i + 3] || "")
+				) {
+					blockDepth += 1;
+					i -= 2;
+					continue;
+				}
+
+				if (
+					fullText.slice(i, i + 8) === "function" &&
+					(i === 0 || !/[A-Za-z0-9_]/.test(fullText[i - 1])) &&
+					!/[A-Za-z0-9_]/.test(fullText[i + 8] || "")
+				) {
+					if (blockDepth === 0) {
+						functionStart = i;
+						break;
+					}
+					blockDepth -= 1;
+					i -= 7;
+					continue;
+				}
+			}
+
+			if (functionStart < 0) {
+				return null;
+			}
+
+			const afterFunc = fullText.slice(functionStart + 8);
+			const paramListMatch = afterFunc.match(
+				/^\s*\(\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)?\s*\)/,
+			);
+			if (!paramListMatch) {
+				searchPos = functionStart;
+				continue;
+			}
+
+			const paramList = paramListMatch[1] || "";
+			params = paramList
+				.split(",")
+				.map((p) => p.trim())
+				.filter(Boolean);
+
+			if (params.includes(parameterName)) {
+				break;
+			}
+
+			searchPos = functionStart;
+		}
+
+		if (functionStart < 0 || !params.includes(parameterName)) {
+			return null;
+		}
+		const callbackParamIndex = params.indexOf(parameterName);
+
+		// Now search backwards from function to find the method call
+		let beforeFunc = fullText.slice(0, functionStart);
+
+		// Match pattern: methodName(  ...and function should appear soon
+		// Look backwards from function position for pattern with method name
+		const methodMatch = beforeFunc.match(
+			/([A-Za-z_][A-Za-z0-9_\.]*)\s*\(\s*$/,
+		);
+		if (!methodMatch) {
+			return null;
+		}
+
+		const methodName = methodMatch[1].replace(/\s+/g, "");
+
+		// Find parameter index by counting commas between paren and function
+		const lastParenPos = beforeFunc.lastIndexOf("(");
+		if (lastParenPos < 0) {
+			return null;
+		}
+
+		const argText = beforeFunc.slice(lastParenPos + 1);
+		let paramIdx = 0;
+		let parenDepth = 0;
+		for (let i = 0; i < argText.length; i += 1) {
+			const ch = argText[i];
+			if (ch === "(") parenDepth += 1;
+			else if (ch === ")") parenDepth -= 1;
+			else if (ch === "," && parenDepth === 0) paramIdx += 1;
+		}
+
+		// Look up the method
+		let targetMethod = null;
+		let typeParamMap = null;
+
+		if (methodName.includes(".")) {
+			const parts = methodName.split(".");
+			const receiverExpr = parts.slice(0, -1).join(".");
+			const receiverMethod = parts[parts.length - 1];
+
+			if (receiverExpr === "self" && classInfo) {
+				const overloads = getMethodOverloads(classInfo, receiverMethod);
+				if (overloads.length > 0) {
+					targetMethod = overloads[0];
+				}
+			} else {
+				let receiverType = inferExpressionType(
+					receiverExpr,
+					model,
+					classInfo,
+					methodInfo,
+					workspaceIndex,
+				);
+				if (
+					!receiverType &&
+					receiverExpr !== parameterName &&
+					/^[A-Za-z_][A-Za-z0-9_]*$/.test(receiverExpr)
+				) {
+					receiverType = resolveCallbackParameterType(
+						lines,
+						lineIdx,
+						receiverExpr,
+						model,
+						classInfo,
+						methodInfo,
+						workspaceIndex,
+					);
+				}
+				if (receiverType) {
+					const resolved = resolveClassByType(receiverType, model, workspaceIndex);
+					if (resolved) {
+						const overloads = getMethodOverloads(resolved.classInfo, receiverMethod);
+						if (overloads.length > 0) {
+							targetMethod = overloads[0];
+							typeParamMap = buildTypeParamMap(resolved.classInfo, receiverType);
+							if (typeParamMap) {
+								targetMethod = specializeMethod(targetMethod, typeParamMap);
+							}
+						}
+					}
+				}
+			}
+		} else if (methodInfo && methodInfo.name === methodName) {
+			targetMethod = methodInfo;
+		} else if (classInfo) {
+			const overloads = getMethodOverloads(classInfo, methodName);
+			if (overloads.length > 0) {
+				targetMethod = overloads[0];
+			}
+		}
+
+		if (!targetMethod || !targetMethod.params || paramIdx >= targetMethod.params.length) {
+			return null;
+		}
+
+		const callbackParamType = targetMethod.params[paramIdx].typeName;
+		if (!callbackParamType || !callbackParamType.startsWith("function")) {
+			return null;
+		}
+
+		const callbackParamTypes = getFunctionTypeParameterTypes(callbackParamType);
+		if (!callbackParamTypes.length) {
+			return null;
+		}
+
+		let resolvedType =
+			callbackParamTypes[Math.max(0, callbackParamIndex)] || callbackParamTypes[0];
+		resolvedType = String(resolvedType || "any").trim();
+		
+		// Apply type parameter specialization
+		if (typeParamMap && typeParamMap.size > 0) {
+			resolvedType = applyTypeParamMap(resolvedType, typeParamMap);
+		}
+
+		return resolvedType;
+	}
+
 	function extractCallContext(beforeCursor) {
 		let depth = 0;
 		let argIndex = 0;
@@ -502,6 +771,7 @@ function createLspHelpers({
 		classInfo,
 		methodInfo,
 		workspaceIndex,
+		cursorLine,
 	) {
 		if (!callContext) {
 			return null;
@@ -533,13 +803,28 @@ function createLspHelpers({
 			const receiverExpr = methodMatch[1];
 			const memberName = methodMatch[2];
 			const allowPrivate = canAccessPrivateMembers(receiverExpr);
-			const receiverType = inferExpressionType(
+			let receiverType = inferExpressionType(
 				receiverExpr,
 				model,
 				classInfo,
 				methodInfo,
 				workspaceIndex,
 			);
+			if (
+				!receiverType &&
+				typeof cursorLine === "number" &&
+				/^[A-Za-z_][A-Za-z0-9_]*$/.test(receiverExpr)
+			) {
+				receiverType = resolveCallbackParameterType(
+					model.lines,
+					cursorLine,
+					receiverExpr,
+					model,
+					classInfo,
+					methodInfo,
+					workspaceIndex,
+				);
+			}
 			const resolved = resolveClassByType(receiverType, model, workspaceIndex);
 			if (!resolved) {
 				return null;
@@ -605,6 +890,7 @@ function createLspHelpers({
 		specializeDocs,
 		specializeMethod,
 		resolveCallSignature,
+		resolveCallbackParameterType,
 	};
 }
 

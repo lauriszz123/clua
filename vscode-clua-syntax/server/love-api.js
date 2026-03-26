@@ -1,10 +1,11 @@
-﻿"use strict";
+"use strict";
+const { normalizeApiMap } = require("./api-types");
 
-// LOVE (LÖVE2D) API docs for CLua LSP.
+// LOVE (L�VE2D) API docs for CLua LSP.
 // Extend this file with more namespaces/functions to grow completion + hover + signature help.
 
 const LOVE_NAMESPACES = {
-  "love": { doc: "LÖVE root namespace." },
+  "love": { doc: "L�VE root namespace." },
   "love.event": { doc: "Event queue operations and app quit handling." },
   "love.keyboard": { doc: "Keyboard state and text input helpers." },
   "love.mouse": { doc: "Mouse state, position, cursor, and visibility." },
@@ -24,16 +25,16 @@ const LOVE_NAMESPACES = {
   "love.thread": { doc: "Create threads and channels for background work." },
 };
 
-const LOVE_FUNCTIONS = {
+const RAW_LOVE_FUNCTIONS = {
   "love.load": {
-    signature: "love.load(args)",
+    signature: "love.load(args: table)",
     doc: "Callback run once on startup (user-defined).",
-    params: [{ name: "args", typeName: "table", description: "Command line args" }],
+    params: [{ name: "args", typeName: "table", doc: "Command line args" }],
   },
   "love.update": {
-    signature: "love.update(dt)",
+    signature: "love.update(dt: number)",
     doc: "Callback run every frame before drawing (user-defined).",
-    params: [{ name: "dt", typeName: "number", description: "Delta time in seconds" }],
+    params: [{ name: "dt", typeName: "number", doc: "Delta time in seconds" }],
   },
   "love.draw": {
     signature: "love.draw()",
@@ -41,19 +42,19 @@ const LOVE_FUNCTIONS = {
     params: [],
   },
   "love.keypressed": {
-    signature: "love.keypressed(key, scancode, isrepeat)",
+    signature: "love.keypressed(key: string, scancode: string, isrepeat: boolean)",
     doc: "Keyboard press callback (user-defined).",
     params: [
-      { name: "key", typeName: "string", description: "Translated key name" },
-      { name: "scancode", typeName: "string", description: "Physical key identifier" },
-      { name: "isrepeat", typeName: "boolean", description: "Whether this is auto-repeat" },
+      { name: "key", typeName: "string", doc: "Translated key name" },
+      { name: "scancode", typeName: "string", doc: "Physical key identifier" },
+      { name: "isrepeat", typeName: "boolean", doc: "Whether this is auto-repeat" },
     ],
   },
 
   "love.event.quit": {
-    signature: "love.event.quit(exitstatus)",
+    signature: "love.event.quit(exitstatus: number)",
     doc: "Requests app quit with optional exit status.",
-    params: [{ name: "exitstatus", typeName: "number", description: "Process exit code" }],
+    params: [{ name: "exitstatus", typeName: "number", doc: "Process exit code" }],
   },
   "love.event.poll": {
     signature: "love.event.poll()",
@@ -67,117 +68,117 @@ const LOVE_FUNCTIONS = {
   },
 
   "love.keyboard.isDown": {
-    signature: "love.keyboard.isDown(key, ...)",
+    signature: "love.keyboard.isDown(key: string, ...: string): boolean",
     doc: "Returns true if all provided keys are currently held down.",
     params: [
-      { name: "key", typeName: "string", description: "First key" },
-      { name: "...", typeName: "string", description: "Additional keys" },
+      { name: "key", typeName: "string", doc: "First key" },
+      { name: "...", typeName: "string", doc: "Additional keys" },
     ],
   },
   "love.keyboard.setKeyRepeat": {
-    signature: "love.keyboard.setKeyRepeat(enable)",
+    signature: "love.keyboard.setKeyRepeat(enable: boolean)",
     doc: "Enables/disables key repeat events.",
-    params: [{ name: "enable", typeName: "boolean", description: "Enable repeat" }],
+    params: [{ name: "enable", typeName: "boolean", doc: "Enable repeat" }],
   },
   "love.keyboard.hasKeyRepeat": {
-    signature: "love.keyboard.hasKeyRepeat()",
+    signature: "love.keyboard.hasKeyRepeat(): boolean",
     doc: "Returns whether key repeat is enabled.",
     params: [],
   },
 
   "love.mouse.getPosition": {
-    signature: "love.mouse.getPosition()",
+    signature: "love.mouse.getPosition(): number, number",
     doc: "Returns current mouse coordinates.",
     params: [],
   },
   "love.mouse.isDown": {
-    signature: "love.mouse.isDown(button, ...)",
+    signature: "love.mouse.isDown(button: number|string, ...: number|string): boolean",
     doc: "Returns true if specified mouse button(s) are held.",
     params: [
-      { name: "button", typeName: "number|string", description: "First mouse button" },
-      { name: "...", typeName: "number|string", description: "Additional buttons" },
+      { name: "button", typeName: "number|string", doc: "First mouse button" },
+      { name: "...", typeName: "number|string", doc: "Additional buttons" },
     ],
   },
   "love.mouse.setVisible": {
-    signature: "love.mouse.setVisible(visible)",
+    signature: "love.mouse.setVisible(visible: boolean)",
     doc: "Shows or hides mouse cursor.",
-    params: [{ name: "visible", typeName: "boolean", description: "Cursor visibility" }],
+    params: [{ name: "visible", typeName: "boolean", doc: "Cursor visibility" }],
   },
 
   "love.graphics.setColor": {
-    signature: "love.graphics.setColor(r, g, b, a)",
+    signature: "love.graphics.setColor(r: number, g: number, b: number, a: number)",
     doc: "Sets the active drawing color.",
     params: [
-      { name: "r", typeName: "number", description: "Red channel" },
-      { name: "g", typeName: "number", description: "Green channel" },
-      { name: "b", typeName: "number", description: "Blue channel" },
-      { name: "a", typeName: "number", description: "Alpha channel" },
+      { name: "r", typeName: "number", doc: "Red channel" },
+      { name: "g", typeName: "number", doc: "Green channel" },
+      { name: "b", typeName: "number", doc: "Blue channel" },
+      { name: "a", typeName: "number", doc: "Alpha channel" },
     ],
   },
   "love.graphics.clear": {
-    signature: "love.graphics.clear(r, g, b, a)",
+    signature: "love.graphics.clear(r: number, g: number, b: number, a: number)",
     doc: "Clears current render target with given color.",
     params: [
-      { name: "r", typeName: "number", description: "Red channel" },
-      { name: "g", typeName: "number", description: "Green channel" },
-      { name: "b", typeName: "number", description: "Blue channel" },
-      { name: "a", typeName: "number", description: "Alpha channel" },
+      { name: "r", typeName: "number", doc: "Red channel" },
+      { name: "g", typeName: "number", doc: "Green channel" },
+      { name: "b", typeName: "number", doc: "Blue channel" },
+      { name: "a", typeName: "number", doc: "Alpha channel" },
     ],
   },
   "love.graphics.print": {
-    signature: "love.graphics.print(text, x, y, r, sx, sy, ox, oy, kx, ky)",
+    signature: "love.graphics.print(text: string|number, x: number, y: number, r: number, sx: number, sy: number, ox: number, oy: number, kx: number, ky: number)",
     doc: "Draws text at the specified position.",
     params: [
-      { name: "text", typeName: "string|number", description: "Text/value to draw" },
-      { name: "x", typeName: "number", description: "X position" },
-      { name: "y", typeName: "number", description: "Y position" },
-      { name: "r", typeName: "number", description: "Rotation (radians)" },
-      { name: "sx", typeName: "number", description: "X scale" },
-      { name: "sy", typeName: "number", description: "Y scale" },
-      { name: "ox", typeName: "number", description: "X origin" },
-      { name: "oy", typeName: "number", description: "Y origin" },
-      { name: "kx", typeName: "number", description: "X shear" },
-      { name: "ky", typeName: "number", description: "Y shear" },
+      { name: "text", typeName: "string|number", doc: "Text/value to draw" },
+      { name: "x", typeName: "number", doc: "X position" },
+      { name: "y", typeName: "number", doc: "Y position" },
+      { name: "r", typeName: "number", doc: "Rotation (radians)" },
+      { name: "sx", typeName: "number", doc: "X scale" },
+      { name: "sy", typeName: "number", doc: "Y scale" },
+      { name: "ox", typeName: "number", doc: "X origin" },
+      { name: "oy", typeName: "number", doc: "Y origin" },
+      { name: "kx", typeName: "number", doc: "X shear" },
+      { name: "ky", typeName: "number", doc: "Y shear" },
     ],
   },
   "love.graphics.newImage": {
-    signature: "love.graphics.newImage(filename)",
+    signature: "love.graphics.newImage(filename: string): Image",
     doc: "Creates a drawable Image from a file path.",
     params: [
-      { name: "filename", typeName: "string", description: "Path to image file" },
+      { name: "filename", typeName: "string", doc: "Path to image file" },
     ],
   },
   "love.graphics.draw": {
-    signature: "love.graphics.draw(drawable, x, y, r, sx, sy, ox, oy, kx, ky)",
+    signature: "love.graphics.draw(drawable: Drawable, [x: number, y: number, r: number, sx: number, sy: number, ox: number, oy: number, kx: number, ky: number])",
     doc: "Draws a Drawable object (Image, Canvas, SpriteBatch, etc.).",
     params: [
-      { name: "drawable", typeName: "Drawable", description: "Object to draw" },
-      { name: "x", typeName: "number", description: "X position" },
-      { name: "y", typeName: "number", description: "Y position" },
-      { name: "r", typeName: "number", description: "Rotation" },
-      { name: "sx", typeName: "number", description: "X scale" },
-      { name: "sy", typeName: "number", description: "Y scale" },
-      { name: "ox", typeName: "number", description: "X origin" },
-      { name: "oy", typeName: "number", description: "Y origin" },
-      { name: "kx", typeName: "number", description: "X shear" },
-      { name: "ky", typeName: "number", description: "Y shear" },
+      { name: "drawable", typeName: "Drawable", doc: "Object to draw" },
+      { name: "x", typeName: "number?", doc: "X position" },
+      { name: "y", typeName: "number?", doc: "Y position" },
+      { name: "r", typeName: "number?", doc: "Rotation" },
+      { name: "sx", typeName: "number?", doc: "X scale" },
+      { name: "sy", typeName: "number?", doc: "Y scale" },
+      { name: "ox", typeName: "number?", doc: "X origin" },
+      { name: "oy", typeName: "number?", doc: "Y origin" },
+      { name: "kx", typeName: "number?", doc: "X shear" },
+      { name: "ky", typeName: "number?", doc: "Y shear" },
     ],
   },
   "love.graphics.newFont": {
-    signature: "love.graphics.newFont(filename, size)",
+    signature: "love.graphics.newFont(filename: string, size: number): Font",
     doc: "Loads a font from file with optional size.",
     params: [
-      { name: "filename", typeName: "string", description: "Font file path" },
-      { name: "size", typeName: "number", description: "Font size" },
+      { name: "filename", typeName: "string", doc: "Font file path" },
+      { name: "size", typeName: "number", doc: "Font size" },
     ],
   },
   "love.graphics.setFont": {
-    signature: "love.graphics.setFont(font)",
+    signature: "love.graphics.setFont(font: Font)",
     doc: "Sets active font used by text drawing functions.",
-    params: [{ name: "font", typeName: "Font", description: "Font object" }],
+    params: [{ name: "font", typeName: "Font", doc: "Font object" }],
   },
   "love.graphics.getDimensions": {
-    signature: "love.graphics.getDimensions()",
+    signature: "love.graphics.getDimensions(): number, number",
     doc: "Returns current width and height of active render target/window.",
     params: [],
   },
@@ -187,9 +188,9 @@ const LOVE_FUNCTIONS = {
     params: [],
   },
   "love.graphics.push": {
-    signature: "love.graphics.push(stacktype)",
+    signature: "love.graphics.push(stacktype: string)",
     doc: "Pushes transform/state stack.",
-    params: [{ name: "stacktype", typeName: "string", description: "all or transform" }],
+    params: [{ name: "stacktype", typeName: "string", doc: "all or transform" }],
   },
   "love.graphics.pop": {
     signature: "love.graphics.pop()",
@@ -197,136 +198,136 @@ const LOVE_FUNCTIONS = {
     params: [],
   },
   "love.graphics.translate": {
-    signature: "love.graphics.translate(x, y)",
+    signature: "love.graphics.translate(x: number, y: number)",
     doc: "Applies translation transform.",
     params: [
-      { name: "x", typeName: "number", description: "X offset" },
-      { name: "y", typeName: "number", description: "Y offset" },
+      { name: "x", typeName: "number", doc: "X offset" },
+      { name: "y", typeName: "number", doc: "Y offset" },
     ],
   },
   "love.graphics.rotate": {
-    signature: "love.graphics.rotate(angle)",
+    signature: "love.graphics.rotate(angle: number)",
     doc: "Applies rotation transform.",
-    params: [{ name: "angle", typeName: "number", description: "Rotation in radians" }],
+    params: [{ name: "angle", typeName: "number", doc: "Rotation in radians" }],
   },
   "love.graphics.scale": {
-    signature: "love.graphics.scale(sx, sy)",
+    signature: "love.graphics.scale(sx: number, sy: number)",
     doc: "Applies scale transform.",
     params: [
-      { name: "sx", typeName: "number", description: "X scale" },
-      { name: "sy", typeName: "number", description: "Y scale" },
+      { name: "sx", typeName: "number", doc: "X scale" },
+      { name: "sy", typeName: "number", doc: "Y scale" },
     ],
   },
   "love.graphics.rectangle": {
-    signature: "love.graphics.rectangle(mode, x, y, w, h, rx, ry, segments)",
+    signature: "love.graphics.rectangle(mode: string, x: number, y: number, w: number, h: number, rx: number, ry: number, segments: number)",
     doc: "Draws a rectangle shape.",
     params: [
-      { name: "mode", typeName: "string", description: "fill or line" },
-      { name: "x", typeName: "number", description: "X position" },
-      { name: "y", typeName: "number", description: "Y position" },
-      { name: "w", typeName: "number", description: "Width" },
-      { name: "h", typeName: "number", description: "Height" },
-      { name: "rx", typeName: "number", description: "Corner radius X" },
-      { name: "ry", typeName: "number", description: "Corner radius Y" },
-      { name: "segments", typeName: "number", description: "Corner segment count" },
+      { name: "mode", typeName: "string", doc: "fill or line" },
+      { name: "x", typeName: "number", doc: "X position" },
+      { name: "y", typeName: "number", doc: "Y position" },
+      { name: "w", typeName: "number", doc: "Width" },
+      { name: "h", typeName: "number", doc: "Height" },
+      { name: "rx", typeName: "number", doc: "Corner radius X" },
+      { name: "ry", typeName: "number", doc: "Corner radius Y" },
+      { name: "segments", typeName: "number", doc: "Corner segment count" },
     ],
   },
 
   "love.window.setMode": {
-    signature: "love.window.setMode(width, height, flags)",
+    signature: "love.window.setMode(width: number, height: number, flags: table)",
     doc: "Sets the window dimensions and optional display flags.",
     params: [
-      { name: "width", typeName: "number", description: "Window width" },
-      { name: "height", typeName: "number", description: "Window height" },
-      { name: "flags", typeName: "table", description: "Mode flags (fullscreen, resizable, vsync, etc.)" },
+      { name: "width", typeName: "number", doc: "Window width" },
+      { name: "height", typeName: "number", doc: "Window height" },
+      { name: "flags", typeName: "table", doc: "Mode flags (fullscreen, resizable, vsync, etc.)" },
     ],
   },
   "love.window.setTitle": {
-    signature: "love.window.setTitle(title)",
+    signature: "love.window.setTitle(title: string)",
     doc: "Sets the window title.",
-    params: [{ name: "title", typeName: "string", description: "Title text" }],
+    params: [{ name: "title", typeName: "string", doc: "Title text" }],
   },
   "love.window.getMode": {
-    signature: "love.window.getMode()",
+    signature: "love.window.getMode(): number, number, table",
     doc: "Returns width, height, and flags table.",
     params: [],
   },
 
   "love.audio.play": {
-    signature: "love.audio.play(source)",
+    signature: "love.audio.play(source: Source|table)",
     doc: "Plays one or more Source objects.",
     params: [
-      { name: "source", typeName: "Source|table", description: "Audio source(s)" },
+      { name: "source", typeName: "Source|table", doc: "Audio source(s)" },
     ],
   },
   "love.audio.newSource": {
-    signature: "love.audio.newSource(filename, type)",
+    signature: "love.audio.newSource(filename: string|SoundData, type: string): Source",
     doc: "Creates a new Source from file or SoundData.",
     params: [
-      { name: "filename", typeName: "string|SoundData", description: "Audio input" },
-      { name: "type", typeName: "string", description: "static or stream" },
+      { name: "filename", typeName: "string|SoundData", doc: "Audio input" },
+      { name: "type", typeName: "string", doc: "static or stream" },
     ],
   },
   "love.audio.setVolume": {
-    signature: "love.audio.setVolume(volume)",
+    signature: "love.audio.setVolume(volume: number)",
     doc: "Sets global master volume.",
-    params: [{ name: "volume", typeName: "number", description: "0..1" }],
+    params: [{ name: "volume", typeName: "number", doc: "0..1" }],
   },
   "love.audio.stop": {
-    signature: "love.audio.stop(source)",
+    signature: "love.audio.stop(source: Source|table)",
     doc: "Stops playback for source(s) or all when omitted.",
-    params: [{ name: "source", typeName: "Source|table", description: "Source(s) to stop" }],
+    params: [{ name: "source", typeName: "Source|table", doc: "Source(s) to stop" }],
   },
 
   "love.filesystem.read": {
-    signature: "love.filesystem.read(filename)",
+    signature: "love.filesystem.read(filename: string): string",
     doc: "Reads all bytes from a file and returns its content.",
     params: [
-      { name: "filename", typeName: "string", description: "File path" },
+      { name: "filename", typeName: "string", doc: "File path" },
     ],
   },
   "love.filesystem.write": {
-    signature: "love.filesystem.write(filename, data, size)",
+    signature: "love.filesystem.write(filename: string, data: string|Data, size: number)",
     doc: "Writes data to file in save directory.",
     params: [
-      { name: "filename", typeName: "string", description: "Output file" },
-      { name: "data", typeName: "string|Data", description: "Data to write" },
-      { name: "size", typeName: "number", description: "Optional byte count" },
+      { name: "filename", typeName: "string", doc: "Output file" },
+      { name: "data", typeName: "string|Data", doc: "Data to write" },
+      { name: "size", typeName: "number", doc: "Optional byte count" },
     ],
   },
   "love.filesystem.getInfo": {
-    signature: "love.filesystem.getInfo(path, filtertype)",
+    signature: "love.filesystem.getInfo(path: string, filtertype: string): table",
     doc: "Returns file info table or nil.",
     params: [
-      { name: "path", typeName: "string", description: "File or directory path" },
-      { name: "filtertype", typeName: "string", description: "file, directory, symlink" },
+      { name: "path", typeName: "string", doc: "File or directory path" },
+      { name: "filtertype", typeName: "string", doc: "file, directory, symlink" },
     ],
   },
   "love.filesystem.getDirectoryItems": {
-    signature: "love.filesystem.getDirectoryItems(dir)",
+    signature: "love.filesystem.getDirectoryItems(dir: string): table",
     doc: "Returns a list of files/directories within a directory.",
-    params: [{ name: "dir", typeName: "string", description: "Directory path" }],
+    params: [{ name: "dir", typeName: "string", doc: "Directory path" }],
   },
   "love.filesystem.load": {
-    signature: "love.filesystem.load(filename)",
+    signature: "love.filesystem.load(filename: string): function",
     doc: "Loads a Lua file and returns a callable chunk.",
-    params: [{ name: "filename", typeName: "string", description: "Lua file" }],
+    params: [{ name: "filename", typeName: "string", doc: "Lua file" }],
   },
 
   "love.timer.getDelta": {
-    signature: "love.timer.getDelta()",
+    signature: "love.timer.getDelta(): number",
     doc: "Returns the time between the last two frames (in seconds).",
     params: [],
   },
   "love.timer.getTime": {
-    signature: "love.timer.getTime()",
+    signature: "love.timer.getTime(): number",
     doc: "Returns current value of high-resolution timer.",
     params: [],
   },
   "love.timer.sleep": {
-    signature: "love.timer.sleep(seconds)",
+    signature: "love.timer.sleep(seconds: number)",
     doc: "Sleeps the thread for a short period.",
-    params: [{ name: "seconds", typeName: "number", description: "Sleep duration" }],
+    params: [{ name: "seconds", typeName: "number", doc: "Sleep duration" }],
   },
   "love.timer.step": {
     signature: "love.timer.step()",
@@ -335,26 +336,26 @@ const LOVE_FUNCTIONS = {
   },
 
   "love.math.random": {
-    signature: "love.math.random([min,] max)",
+    signature: "love.math.random([min: number,] max: number): number",
     doc: "Returns a pseudo-random number.",
     params: [
-      { name: "min", typeName: "number", description: "Optional minimum" },
-      { name: "max", typeName: "number", description: "Maximum (or upper bound if min omitted)" },
+      { name: "min", typeName: "number", doc: "Optional minimum" },
+      { name: "max", typeName: "number", doc: "Maximum (or upper bound if min omitted)" },
     ],
   },
   "love.math.randomseed": {
-    signature: "love.math.randomseed(seed)",
+    signature: "love.math.randomseed(seed: number)",
     doc: "Sets random seed for love.math.random.",
-    params: [{ name: "seed", typeName: "number", description: "Seed value" }],
+    params: [{ name: "seed", typeName: "number", doc: "Seed value" }],
   },
   "love.math.noise": {
     signature: "love.math.noise(x, y, z, w)",
     doc: "Returns simplex noise value.",
     params: [
-      { name: "x", typeName: "number", description: "First coordinate" },
-      { name: "y", typeName: "number", description: "Second coordinate" },
-      { name: "z", typeName: "number", description: "Third coordinate" },
-      { name: "w", typeName: "number", description: "Fourth coordinate" },
+      { name: "x", typeName: "number", doc: "First coordinate" },
+      { name: "y", typeName: "number", doc: "Second coordinate" },
+      { name: "z", typeName: "number", doc: "Third coordinate" },
+      { name: "w", typeName: "number", doc: "Fourth coordinate" },
     ],
   },
 
@@ -362,19 +363,19 @@ const LOVE_FUNCTIONS = {
     signature: "love.physics.newWorld(gx, gy, sleep)",
     doc: "Creates a new Box2D world.",
     params: [
-      { name: "gx", typeName: "number", description: "Gravity X" },
-      { name: "gy", typeName: "number", description: "Gravity Y" },
-      { name: "sleep", typeName: "boolean", description: "Allow sleeping bodies" },
+      { name: "gx", typeName: "number", doc: "Gravity X" },
+      { name: "gy", typeName: "number", doc: "Gravity Y" },
+      { name: "sleep", typeName: "boolean", doc: "Allow sleeping bodies" },
     ],
   },
   "love.physics.newBody": {
     signature: "love.physics.newBody(world, x, y, type)",
     doc: "Creates a new physics body.",
     params: [
-      { name: "world", typeName: "World", description: "Physics world" },
-      { name: "x", typeName: "number", description: "X position" },
-      { name: "y", typeName: "number", description: "Y position" },
-      { name: "type", typeName: "string", description: "static, dynamic, or kinematic" },
+      { name: "world", typeName: "World", doc: "Physics world" },
+      { name: "x", typeName: "number", doc: "X position" },
+      { name: "y", typeName: "number", doc: "Y position" },
+      { name: "type", typeName: "string", doc: "static, dynamic, or kinematic" },
     ],
   },
 
@@ -386,7 +387,7 @@ const LOVE_FUNCTIONS = {
   "love.system.setClipboardText": {
     signature: "love.system.setClipboardText(text)",
     doc: "Sets clipboard text.",
-    params: [{ name: "text", typeName: "string", description: "Clipboard content" }],
+    params: [{ name: "text", typeName: "string", doc: "Clipboard content" }],
   },
   "love.system.getClipboardText": {
     signature: "love.system.getClipboardText()",
@@ -396,20 +397,22 @@ const LOVE_FUNCTIONS = {
   "love.system.openURL": {
     signature: "love.system.openURL(url)",
     doc: "Opens URL using system default handler.",
-    params: [{ name: "url", typeName: "string", description: "Target URL" }],
+    params: [{ name: "url", typeName: "string", doc: "Target URL" }],
   },
 
   "love.thread.newThread": {
     signature: "love.thread.newThread(filename)",
     doc: "Creates a thread from Lua file or source code.",
-    params: [{ name: "filename", typeName: "string", description: "Thread script" }],
+    params: [{ name: "filename", typeName: "string", doc: "Thread script" }],
   },
   "love.thread.getChannel": {
     signature: "love.thread.getChannel(name)",
     doc: "Returns a named Channel object.",
-    params: [{ name: "name", typeName: "string", description: "Channel name" }],
+    params: [{ name: "name", typeName: "string", doc: "Channel name" }],
   },
 };
+
+const LOVE_FUNCTIONS = normalizeApiMap(RAW_LOVE_FUNCTIONS, "LOVE_FUNCTIONS");
 
 function getLoveChildren(prefix) {
   const needle = `${prefix}.`;
@@ -433,7 +436,7 @@ function getLoveChildren(prefix) {
         fullName,
         kind: "namespace",
         detail: fullName,
-        doc: LOVE_NAMESPACES[fullName] ? LOVE_NAMESPACES[fullName].doc : "LÖVE namespace",
+        doc: LOVE_NAMESPACES[fullName] ? LOVE_NAMESPACES[fullName].doc : "L�VE namespace",
       });
     }
   }
@@ -476,3 +479,4 @@ module.exports = {
   getLoveFunction,
   getLoveNamespace,
 };
+

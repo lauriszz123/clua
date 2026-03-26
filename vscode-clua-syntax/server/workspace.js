@@ -3,9 +3,12 @@
 
 const fs = require("fs");
 const path = require("path");
+const childProcess = require("child_process");
 const { fileURLToPath, pathToFileURL } = require("url");
 const { SymbolKind } = require("vscode-languageserver/node");
 const { buildModel } = require("./parser");
+
+let cachedLuaRocksCluaInstall = undefined;
 
 function fileUriToPath(uri) {
 	try {
@@ -371,6 +374,74 @@ function moduleVariantCandidates(moduleVariant) {
 	];
 }
 
+function normalizePathForCurrentPlatform(filePath) {
+	if (!filePath) {
+		return null;
+	}
+	return path.normalize(String(filePath).replace(/\\/g, path.sep));
+}
+
+function getLuaRocksCluaInstallPath() {
+	if (cachedLuaRocksCluaInstall !== undefined) {
+		return cachedLuaRocksCluaInstall;
+	}
+
+	try {
+		const output = childProcess.execFileSync("luarocks", ["show", "clua"], {
+			encoding: "utf8",
+			windowsHide: true,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+		const match = output.match(/^Installed in:\s+(.+)$/m);
+		cachedLuaRocksCluaInstall = match
+			? normalizePathForCurrentPlatform(match[1].trim())
+			: null;
+	} catch (_err) {
+		cachedLuaRocksCluaInstall = null;
+	}
+
+	return cachedLuaRocksCluaInstall;
+}
+
+function resolveCluaStdFromLuaRocks(modulePath, emit) {
+	if (!modulePath || (!modulePath.startsWith("std.") && !modulePath.startsWith("clua.std."))) {
+		return null;
+	}
+
+	const installRoot = getLuaRocksCluaInstallPath();
+	if (!installRoot) {
+		return null;
+	}
+
+	const moduleName = modulePath.startsWith("std.")
+		? modulePath.slice(4)
+		: modulePath.slice(9);
+	const pathPart = moduleName.replace(/\./g, path.sep);
+	const candidates = [
+		path.join(installRoot, "share", "lua", "5.4", "clua", "std", `${pathPart}.clua`),
+		path.join(installRoot, "share", "lua", "5.4", "clua", "std", pathPart, "init.clua"),
+		path.join(installRoot, "share", "lua", "5.4", "clua", "std", pathPart, `${path.basename(pathPart)}.clua`),
+	];
+
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate)) {
+			if (emit) {
+				emit({
+					event: "hit",
+					modulePath,
+					path: candidate,
+					variant: "luarocks-show",
+					candidate,
+					root: installRoot,
+				});
+			}
+			return candidate;
+		}
+	}
+
+	return null;
+}
+
 function resolveModulePathToFile(
 	modulePath,
 	activeUri,
@@ -389,6 +460,58 @@ function resolveModulePathToFile(
 	for (const variant of variants) {
 		for (const candidate of moduleVariantCandidates(variant)) {
 			candidatePaths.push(candidate);
+		}
+	}
+
+	if (emit) {
+		emit({
+			event: "start",
+			modulePath,
+			rootCount: roots.length,
+			variantCount: variants.length,
+			roots,
+			variants,
+		});
+	}
+
+	const luaRocksStdHit = resolveCluaStdFromLuaRocks(modulePath, emit);
+	if (luaRocksStdHit) {
+		return luaRocksStdHit;
+	}
+
+	for (const root of roots) {
+		for (const variant of variants) {
+			for (const candidate of moduleVariantCandidates(variant)) {
+				const full = path.join(root, candidate);
+				if (fs.existsSync(full)) {
+					if (emit) {
+						emit({
+							event: "hit",
+							modulePath,
+							path: full,
+							variant,
+							candidate,
+							root,
+						});
+					}
+					return full;
+				}
+
+				const underSrc = path.join(root, "src", candidate);
+				if (fs.existsSync(underSrc)) {
+					if (emit) {
+						emit({
+							event: "hit",
+							modulePath,
+							path: underSrc,
+							variant,
+							candidate: `src/${candidate}`,
+							root,
+						});
+					}
+					return underSrc;
+				}
+			}
 		}
 	}
 
@@ -416,17 +539,6 @@ function resolveModulePathToFile(
 				path.join(folderPath, "lib", "lib", "luarocks", `rocks-${version}`),
 			);
 		}
-	}
-
-	if (emit) {
-		emit({
-			event: "start",
-			modulePath,
-			rootCount: roots.length,
-			variantCount: variants.length,
-			roots,
-			variants,
-		});
 	}
 
 	for (const rocksRoot of rocksRoots) {
@@ -469,42 +581,6 @@ function resolveModulePathToFile(
 						}
 						return full;
 					}
-				}
-			}
-		}
-	}
-
-	for (const root of roots) {
-		for (const variant of variants) {
-			for (const candidate of moduleVariantCandidates(variant)) {
-				const full = path.join(root, candidate);
-				if (fs.existsSync(full)) {
-					if (emit) {
-						emit({
-							event: "hit",
-							modulePath,
-							path: full,
-							variant,
-							candidate,
-							root,
-						});
-					}
-					return full;
-				}
-
-				const underSrc = path.join(root, "src", candidate);
-				if (fs.existsSync(underSrc)) {
-					if (emit) {
-						emit({
-							event: "hit",
-							modulePath,
-							path: underSrc,
-							variant,
-							candidate: `src/${candidate}`,
-							root,
-						});
-					}
-					return underSrc;
 				}
 			}
 		}

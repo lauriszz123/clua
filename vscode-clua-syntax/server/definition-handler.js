@@ -15,6 +15,7 @@ function registerDefinitionHandler({
 	resolveClassByType,
 	getMethodOverloads,
 	getImportedModuleForSymbol,
+	resolveCallbackParameterType,
 }) {
 	connection.onDefinition((params) => {
 		const document = documents.get(params.textDocument.uri);
@@ -93,13 +94,24 @@ function registerDefinitionHandler({
 			}
 
 			const allowPrivate = canAccessPrivateMembers(receiverExpr);
-			const receiverType = inferExpressionType(
+			let receiverType = inferExpressionType(
 				receiverExpr,
 				model,
 				classInfo,
 				methodInfo,
 				workspaceIndex,
 			);
+			if (!receiverType && /^[A-Za-z_][A-Za-z0-9_]*$/.test(receiverExpr)) {
+				receiverType = resolveCallbackParameterType(
+					model.lines,
+					params.position.line,
+					receiverExpr,
+					model,
+					classInfo,
+					methodInfo,
+					workspaceIndex,
+				);
+			}
 			const resolvedClass = resolveClassByType(
 				receiverType,
 				model,
@@ -138,6 +150,10 @@ function registerDefinitionHandler({
 					};
 				}
 			}
+
+			// In member access context, avoid unqualified fallback (e.g. `scene.draw`
+			// resolving to `self.draw` when receiver resolution fails).
+			return null;
 		}
 
 		if (model.classes.has(word) || workspaceIndex.has(word)) {
