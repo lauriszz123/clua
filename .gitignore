@@ -40,3 +40,12 @@ luac.out
 *.hex
 .vscode
 .DS_Store
+
+# Node / VS Code extension build artifacts
+node_modules/
+*.vsix
+vscode-clua-syntax/clua-syntax@*
+
+# LuaRocks project-local tree (see README)
+lib/
+.luarocks/
