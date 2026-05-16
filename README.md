@@ -1,6 +1,26 @@
 # clua
 
+[![CI](https://github.com/lauriszz123/clua/actions/workflows/ci.yml/badge.svg)](https://github.com/lauriszz123/clua/actions/workflows/ci.yml)
+
 Minimal typed class transpiler for Lua with on-the-fly `.clua` loading.
+
+## Architecture
+
+This repository is organized into four cooperating layers. New contributors
+should pick the layer that matches the change they want to make:
+
+| Layer | Path | Purpose |
+| --- | --- | --- |
+| Compiler | [clua/compiler/](clua/compiler/) | Parser, semantic analyzer, type system, and code generator that transpile `.clua` source into Lua. |
+| Runtime / loader | [clua/init.lua](clua/init.lua), [clua/runtime.lua](clua/runtime.lua) | Installs the `require` hook so `.clua` modules transpile and load on demand. Entry point for end users (`require("clua")`). |
+| Standard library | [clua/std/](clua/std/) | Portable, runtime-agnostic `.clua` modules (`List`, `HashMap`, `Option`, `Result`, ...) shipped via the rockspec. |
+| Love2D integration | [clua/love.lua](clua/love.lua) | Optional bridge that wires a CLua class to Love2D callbacks (`love.load`, `love.update`, `love.draw`, ...). Only loaded when the host explicitly requires it. |
+| Editor tooling | [vscode-clua-syntax/](vscode-clua-syntax/) | Self-contained VS Code extension: TextMate grammar, snippets, and a Node-based language server (completion, diagnostics, hover, definitions, formatting). Has its own `package.json` and test suite and does not depend on the Lua runtime at build time. |
+
+The core compiler, runtime, and stdlib are distributed together through the
+[`clua-scm-1.rockspec`](clua-scm-1.rockspec). The Love2D bridge and the VS Code
+extension are independent surfaces that build on top of the core but can be
+shipped, versioned, and tested separately.
 
 ## Install (LuaRocks)
 
@@ -180,3 +200,19 @@ end
 
 - CLua runtime/compiler suites: `lua tests/lua/run_all.lua`
 - VS Code language server and language asset suites: `cd vscode-clua-syntax && npm test`
+
+Both suites run on every push and pull request via [GitHub Actions](.github/workflows/ci.yml),
+covering Lua 5.1, 5.4, and LuaJIT 2.1 for the runtime, and Node.js 20 and 22 for
+the VS Code extension. The workflow also lints the rockspec, performs a
+`luarocks make` install test, and produces a VSIX packaging smoke build.
+
+## Releases and build artifacts
+
+Generated artifacts are intentionally not committed:
+
+- `vscode-clua-syntax/node_modules/` is reproduced from `package-lock.json` with `npm ci`.
+- `vscode-clua-syntax/clua-syntax.vsix` is built on demand with `npm run package:out` (or downloaded from the CI workflow's `clua-syntax-vsix` artifact).
+- A locally installed LuaRocks tree under `lib/` (see install instructions above) is also ignored.
+
+If you cloned the repo before these were removed, run
+`git clean -fdX vscode-clua-syntax` to drop any leftover ignored files.
